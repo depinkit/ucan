@@ -123,16 +123,9 @@ func (ctx *BasicCapabilityContext) Stop() {
 
 func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide TokenList) error {
 	ctx.addRoots(roots)
-	roots = ctx.getRoots()
 
 	now := uint64(time.Now().UnixNano())
 	for _, t := range require.Tokens {
-		for _, root := range roots {
-			if !t.Anchor(root) {
-				return fmt.Errorf("token is not anchored on our roots: %w", ErrNotAuthorized)
-			}
-		}
-
 		if err := t.Verify(ctx.trust, now); err != nil {
 			return fmt.Errorf("verify token: %w", err)
 		}
@@ -141,10 +134,6 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide To
 	}
 
 	for _, t := range provide.Tokens {
-		if !t.Anchor(t.Issuer()) {
-			continue
-		}
-
 		if err := t.Verify(ctx.trust, now); err != nil {
 			return fmt.Errorf("verify token: %w", err)
 		}
