@@ -236,7 +236,7 @@ func (ctx *BasicCapabilityContext) DelegateInvocation(target, subject, audience 
 		return TokenList{}, nil
 	}
 
-	var result []*Token //nolint
+	var result []*Token
 
 	// first get tokens we have about ourselves and see if any allows delegation to
 	// the subject for the audience
