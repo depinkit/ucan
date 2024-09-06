@@ -32,29 +32,39 @@ type CapabilityContext interface {
 	Discard(cap []byte)
 
 	// Require ensures that at least one of the capabilities is delegated from
-	// the subject to the audience, anchored in our own DID
+	// the subject to the audience, with an appropriate anchor
 	// An empty list will mean that no capabilities are required and is vacuously
 	// true.
-	Require(anchor did.DID, subject crypto.ID, audience crypto.ID, cap []Capability) error
+	Require(anchor did.DID, subject crypto.ID, audience crypto.ID, require []Capability) error
+
+	// RequireBroadcast ensures that at least one of the capabilities is delegated
+	// to thes subject for the specified broadcast topics
+	RequireBroadcast(origin did.DID, subject crypto.ID, topic string, require []Capability) error
 
 	// Provide prepares the appropriate capability tokens to prove and delegate authority
 	// to a subject for an audience.
-	// Specifically:
-	// - tokens for all cap capabilities from the anchor DID to subject for audience.
-	// - tokens for all delegate capabilities from our DID to audience for subject.
-	Provide(anchor did.DID, subject crypto.ID, audience crypto.ID, expire uint64, cap []Capability, delegate []Capability) ([]byte, error)
+	// - It delegates invocations to the subject with an audience and invoke capabilities
+	// - It delegates the delegate capabilities to the target with audience the subject
+	Provide(target did.DID, subject crypto.ID, audience crypto.ID, expire uint64, invoke []Capability, delegate []Capability) ([]byte, error)
+
+	// ProvideBroadcast prepares the appropriate capability tokens to prove authority
+	// to broadcast to a topic
+	ProvideBroadcast(subject crypto.ID, topic string, expire uint64, broadcast []Capability) ([]byte, error)
 
 	// AddRoots adds trust anchors and/or capabilities derived from our anchors
 	AddRoots(trust []did.DID, require, provide TokenList) error
 
 	// Delegate creates the appropriate delegation tokens anchored in our roots
-	Delegate(subject, audience did.DID, expire uint64, cap []Capability) (TokenList, error)
+	Delegate(subject, audience did.DID, topics []string, expire uint64, cap []Capability) (TokenList, error)
 
 	// DelegateInvocation creates the appropriate invocation tokens anchored in anchor
 	DelegateInvocation(anchor, subject, audience did.DID, expire uint64, provide []Capability) (TokenList, error)
 
+	// DelegateBroadcast creates the appropriate broadcast token anchored in our roots
+	DelegateBroadcast(subject did.DID, topic string, expire uint64, provide []Capability) (TokenList, error)
+
 	// Grant creates the appropriate delegation tokens considering ourselves as the root
-	Grant(action Action, subject, audience did.DID, expire uint64, provide []Capability) (TokenList, error)
+	Grant(action Action, subject, audience did.DID, topic []string, expire uint64, provide []Capability) (TokenList, error)
 
 	// Start starts a token garbage collector goroutine that clears expired tokens
 	Start(gcInterval time.Duration)
@@ -144,7 +154,7 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide To
 	return nil
 }
 
-func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DID, expire uint64, provide []Capability) (TokenList, error) {
+func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DID, topic []string, expire uint64, provide []Capability) (TokenList, error) {
 	nonce := make([]byte, nonceLength)
 	_, err := rand.Read(nonce)
 	if err != nil {
@@ -156,6 +166,7 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 		Subject:    subject,
 		Audience:   audience,
 		Action:     action,
+		Topic:      topic,
 		Capability: provide,
 		Nonce:      nonce,
 		Expire:     expire,
@@ -175,7 +186,7 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 	return TokenList{Tokens: []*Token{{DMS: result}}}, nil
 }
 
-func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, expire uint64, provide []Capability) (TokenList, error) {
+func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []string, expire uint64, provide []Capability) (TokenList, error) {
 	if len(provide) == 0 {
 		return TokenList{}, nil
 	}
@@ -191,7 +202,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, expire ui
 		for _, t := range tokenList {
 			var providing []Capability
 			for _, c := range provide {
-				if t.Anchor(trustAnchor) && t.AllowDelegation(ctx.DID(), audience, expire, c) {
+				if t.Anchor(trustAnchor) && t.AllowDelegation(ctx.DID(), audience, topics, expire, c) {
 					providing = append(providing, c)
 				}
 			}
@@ -200,7 +211,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, expire ui
 				continue
 			}
 
-			token, err := t.Delegate(ctx.provider, subject, audience, expire, providing)
+			token, err := t.Delegate(ctx.provider, subject, audience, topics, expire, providing)
 			if err != nil {
 				log.Debugf("error delegating %s to %s: %s", providing, subject, err)
 				continue
@@ -211,7 +222,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, expire ui
 	}
 
 	// self-sign as well
-	tokens, err := ctx.Grant(Delegate, subject, audience, expire, provide)
+	tokens, err := ctx.Grant(Delegate, subject, audience, nil, expire, provide)
 	if err != nil {
 		return TokenList{}, fmt.Errorf("error granting invocation: %w", err)
 	}
@@ -241,7 +252,7 @@ func (ctx *BasicCapabilityContext) DelegateInvocation(target, subject, audience 
 	}
 
 	// self-sign as well
-	selfTokens, err := ctx.Grant(Invoke, subject, audience, expire, provide)
+	selfTokens, err := ctx.Grant(Invoke, subject, audience, nil, expire, provide)
 	if err != nil {
 		return TokenList{}, fmt.Errorf("error granting invocation: %w", err)
 	}
@@ -253,13 +264,9 @@ func (ctx *BasicCapabilityContext) DelegateInvocation(target, subject, audience 
 func (ctx *BasicCapabilityContext) delegateInvocation(tokenList []*Token, anchor, subject, audience did.DID, expire uint64, provide []Capability) []*Token {
 	var result []*Token //nolint
 	for _, t := range tokenList {
-		if len(provide) == 0 {
-			break
-		}
-
 		var providing []Capability
 		for _, c := range provide {
-			if t.Anchor(anchor) && t.AllowDelegation(ctx.DID(), audience, expire, c) {
+			if t.Anchor(anchor) && t.AllowDelegation(ctx.DID(), audience, nil, expire, c) {
 				providing = append(providing, c)
 			}
 		}
@@ -274,9 +281,56 @@ func (ctx *BasicCapabilityContext) delegateInvocation(tokenList []*Token, anchor
 			continue
 		}
 
-		provide = slices.DeleteFunc(slices.Clone(provide), func(c Capability) bool {
-			return slices.Contains(providing, c)
-		})
+		result = append(result, token)
+	}
+
+	return result
+}
+
+func (ctx *BasicCapabilityContext) DelegateBroadcast(subject did.DID, topic string, expire uint64, provide []Capability) (TokenList, error) {
+	if len(provide) == 0 {
+		return TokenList{}, nil
+	}
+
+	var result []*Token
+
+	// first we issue tokens chained on our provide anchors as appropriate
+	for _, trustAnchor := range ctx.getProvideAnchors() {
+		tokenList := ctx.getProvideTokens(trustAnchor)
+		tokens := ctx.delegateBroadcast(tokenList, trustAnchor, subject, topic, expire, provide)
+		result = append(result, tokens...)
+	}
+
+	// self-sign as well
+	selfTokens, err := ctx.Grant(Broadcast, subject, did.DID{}, []string{topic}, expire, provide)
+	if err != nil {
+		return TokenList{}, fmt.Errorf("error granting broadcast: %w", err)
+	}
+	result = append(result, selfTokens.Tokens...)
+
+	return TokenList{Tokens: result}, nil
+}
+
+func (ctx *BasicCapabilityContext) delegateBroadcast(tokenList []*Token, anchor did.DID, subject did.DID, topic string, expire uint64, provide []Capability) []*Token {
+	var result []*Token //nolint
+	for _, t := range tokenList {
+		var providing []Capability
+		for _, c := range provide {
+			if t.Anchor(anchor) && t.AllowDelegation(ctx.DID(), did.DID{}, []string{topic}, expire, c) {
+				providing = append(providing, c)
+			}
+		}
+
+		if len(providing) == 0 {
+			continue
+		}
+
+		token, err := t.DelegateBroadcast(ctx.provider, subject, topic, expire, providing)
+		if err != nil {
+			log.Debugf("error delegating invocation %s to %s: %s", providing, subject, err)
+			continue
+		}
+
 		result = append(result, token)
 	}
 
@@ -398,9 +452,8 @@ func (ctx *BasicCapabilityContext) consumeSubjectToken(t *Token) {
 }
 
 func (ctx *BasicCapabilityContext) Require(anchor did.DID, subject crypto.ID, audience crypto.ID, cap []Capability) error {
-	// no capabilities required, we have to allow this for certain public behaviors
 	if len(cap) == 0 {
-		return nil
+		return fmt.Errorf("no capabilities: %w", ErrNotAuthorized)
 	}
 
 	subjectDID, err := did.FromID(subject)
@@ -431,7 +484,46 @@ func (ctx *BasicCapabilityContext) Require(anchor did.DID, subject crypto.ID, au
 
 			for _, anchor := range requireAnchors {
 				for _, rt := range ctx.getRequireTokens(anchor) {
-					if rt.AllowAction(t) && t.Anchor(rt.Subject()) && t.AllowInvocation(subjectDID, audienceDID, c) {
+					if rt.AllowAction(t) && t.AllowInvocation(subjectDID, audienceDID, c) {
+						return nil
+					}
+				}
+			}
+		}
+	}
+
+	return ErrNotAuthorized
+}
+
+func (ctx *BasicCapabilityContext) RequireBroadcast(anchor did.DID, subject crypto.ID, topic string, require []Capability) error {
+	if len(require) == 0 {
+		return fmt.Errorf("no capabilities: %w", ErrNotAuthorized)
+	}
+
+	subjectDID, err := did.FromID(subject)
+	if err != nil {
+		return fmt.Errorf("DID for subject: %w", err)
+	}
+
+	tokenList := ctx.getSubjectTokens(subjectDID)
+	roots := ctx.getRoots()
+	requireAnchors := ctx.getRequireAnchors()
+
+	for _, t := range tokenList {
+		for _, c := range require {
+			if t.Anchor(anchor) && t.AllowBroadcast(subjectDID, topic, c) {
+				return nil
+			}
+
+			for _, anchor := range roots {
+				if t.Anchor(anchor) && t.AllowBroadcast(subjectDID, topic, c) {
+					return nil
+				}
+			}
+
+			for _, anchor := range requireAnchors {
+				for _, rt := range ctx.getRequireTokens(anchor) {
+					if rt.AllowAction(t) && t.AllowBroadcast(subjectDID, topic, c) {
 						return nil
 					}
 				}
@@ -444,7 +536,7 @@ func (ctx *BasicCapabilityContext) Require(anchor did.DID, subject crypto.ID, au
 
 func (ctx *BasicCapabilityContext) Provide(target did.DID, subject crypto.ID, audience crypto.ID, expire uint64, invoke []Capability, provide []Capability) ([]byte, error) {
 	if len(invoke) == 0 && len(provide) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no capabilities: %w", ErrNotAuthorized)
 	}
 
 	subjectDID, err := did.FromID(subject)
@@ -461,7 +553,7 @@ func (ctx *BasicCapabilityContext) Provide(target did.DID, subject crypto.ID, au
 	var invocation, delegation TokenList
 
 	if len(invoke) == 0 {
-		goto delegate
+		return nil, fmt.Errorf("no invocation capabilities: %w", ErrNotAuthorized)
 	}
 
 	invocation, err = ctx.DelegateInvocation(target, subjectDID, audienceDID, expire, invoke)
@@ -475,12 +567,11 @@ func (ctx *BasicCapabilityContext) Provide(target did.DID, subject crypto.ID, au
 
 	result = append(result, invocation.Tokens...)
 
-delegate:
 	if len(provide) == 0 {
 		goto marshal
 	}
 
-	delegation, err = ctx.Delegate(target, subjectDID, expire, provide)
+	delegation, err = ctx.Delegate(target, subjectDID, nil, expire, provide)
 	if err != nil {
 		return nil, fmt.Errorf("cannot provide delegation tokens: %w", err)
 	}
@@ -494,6 +585,33 @@ delegate:
 marshal:
 	payload := TokenList{Tokens: result}
 	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling payload: %w", err)
+	}
+
+	return data, nil
+}
+
+func (ctx *BasicCapabilityContext) ProvideBroadcast(subject crypto.ID, topic string, expire uint64, provide []Capability) ([]byte, error) {
+	if len(provide) == 0 {
+		return nil, fmt.Errorf("no capabilities: %w", ErrNotAuthorized)
+	}
+
+	subjectDID, err := did.FromID(subject)
+	if err != nil {
+		return nil, fmt.Errorf("DID for subject: %w", err)
+	}
+
+	broadcast, err := ctx.DelegateBroadcast(subjectDID, topic, expire, provide)
+	if err != nil {
+		return nil, fmt.Errorf("cannot provide broadcast tokens: %w", err)
+	}
+
+	if len(broadcast.Tokens) == 0 {
+		return nil, fmt.Errorf("cannot provide the necessary broadcast tokens: %w", ErrNotAuthorized)
+	}
+
+	data, err := json.Marshal(broadcast)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling payload: %w", err)
 	}

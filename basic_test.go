@@ -43,6 +43,7 @@ func makeActorCapabilityContext(t *testing.T, rootCtx CapabilityContext, actorCa
 		Delegate,
 		actorDID,
 		did.DID{},
+		nil,
 		makeExpiry(120*time.Second),
 		actorCap,
 	)
@@ -65,12 +66,41 @@ func allowReciprocal(t *testing.T, actor, root, otherRoot CapabilityContext, act
 		Delegate,
 		otherRoot.DID(),
 		did.DID{},
+		nil,
 		makeExpiry(120*time.Second),
 		actorCap)
 	require.NoError(t, err, "granting reciprocal capabilities")
 
 	err = actor.AddRoots(nil, tokens, TokenList{})
-	require.NoError(t, err, "consuming reciprocal capabilities")
+	require.NoError(t, err, "add roots")
+}
+
+func allowBroadcast(t *testing.T, actor1, actor2, root1, root2 CapabilityContext, topic string, actorCap ...Capability) {
+	tokens, err := root1.Grant(
+		Delegate,
+		actor1.DID(),
+		did.DID{},
+		[]string{topic},
+		makeExpiry(120*time.Second),
+		actorCap,
+	)
+	require.NoError(t, err, "granting broadcast capability")
+
+	err = actor1.AddRoots(nil, TokenList{}, tokens)
+	require.NoError(t, err, "add roots")
+
+	tokens, err = root2.Grant(
+		Delegate,
+		root1.DID(),
+		did.DID{},
+		[]string{topic},
+		makeExpiry(120*time.Second),
+		actorCap,
+	)
+	require.NoError(t, err, "granting broadcast capability")
+
+	err = actor2.AddRoots(nil, tokens, TokenList{})
+	require.NoError(t, err, "add roots")
 }
 
 func makeActorID(t *testing.T) crypto.ID {
@@ -243,6 +273,67 @@ func TestReciprocalDistrust(t *testing.T) {
 		actor1ID,
 		actor2ID,
 		[]Capability{Capability("/test/invoke")},
+	)
+	require.Error(t, err, "require")
+}
+
+func TestBroadcastUCAN(t *testing.T) {
+	topic := "test"
+	capability := Capability("/test/broadcast")
+
+	root1 := makeRootCapabilityContext(t)
+	root2 := makeRootCapabilityContext(t)
+	actor1 := makeActorCapabilityContext(t, root1)
+	actor2 := makeActorCapabilityContext(t, root2)
+	allowBroadcast(t, actor1, actor2, root1, root2, topic, capability)
+
+	actor1ID := makeActorID(t)
+	actorCap, err := actor1.ProvideBroadcast(
+		actor1ID,
+		topic,
+		makeExpiry(30*time.Second),
+		[]Capability{capability},
+	)
+	require.NoError(t, err, "provide")
+
+	err = actor2.Consume(actor1.DID(), actorCap)
+	require.NoError(t, err, "consume")
+
+	err = actor2.RequireBroadcast(
+		actor2.DID(),
+		actor1ID,
+		topic,
+		[]Capability{capability},
+	)
+	require.NoError(t, err, "require")
+}
+
+func TestBroadcastDistrust(t *testing.T) {
+	topic := "test"
+	capability := Capability("/test/broadcast")
+
+	root1 := makeRootCapabilityContext(t)
+	root2 := makeRootCapabilityContext(t)
+	actor1 := makeActorCapabilityContext(t, root1)
+	actor2 := makeActorCapabilityContext(t, root2)
+
+	actor1ID := makeActorID(t)
+	actorCap, err := actor1.ProvideBroadcast(
+		actor1ID,
+		topic,
+		makeExpiry(30*time.Second),
+		[]Capability{capability},
+	)
+	require.NoError(t, err, "provide")
+
+	err = actor2.Consume(actor1.DID(), actorCap)
+	require.NoError(t, err, "consume")
+
+	err = actor2.RequireBroadcast(
+		actor2.DID(),
+		actor1ID,
+		topic,
+		[]Capability{capability},
 	)
 	require.Error(t, err, "require")
 }

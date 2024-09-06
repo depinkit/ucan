@@ -13,8 +13,9 @@ import (
 type Action string
 
 const (
-	Invoke   Action = "invoke"
-	Delegate Action = "delegate"
+	Invoke    Action = "invoke"
+	Delegate  Action = "delegate"
+	Broadcast Action = "broadcast"
 	// Revoke   Action = "revoke" // TODO
 
 	nonceLength = 12 // 96 bits
@@ -34,6 +35,7 @@ type DMSToken struct {
 	Subject    did.DID      `json:"sub"`
 	Audience   did.DID      `json:"aud"`
 	Action     Action       `json:"act"`
+	Topic      []string     `json:"topic,omitempty"`
 	Capability []Capability `json:"cap"`
 	Nonce      []byte       `json:"nonce"`
 	Expire     uint64       `json:"exp"`
@@ -125,6 +127,18 @@ func (t *Token) Capability() []Capability {
 	}
 }
 
+func (t *Token) Topic() []string {
+	switch {
+	case t.DMS != nil:
+		return t.DMS.Topic
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return nil
+	}
+}
+
 func (t *Token) Expire() uint64 {
 	switch {
 	case t.DMS != nil:
@@ -195,10 +209,16 @@ func (t *DMSToken) Verify(trust did.TrustContext, now uint64) error {
 			return ErrNotAuthorized
 		}
 
+		for _, topic := range t.Topic {
+			if !slices.Contains(t.Chain.Topic(), topic) {
+				return ErrNotAuthorized
+			}
+		}
+
 		needCapability := slices.Clone(t.Capability)
 	loop:
 		for _, c := range needCapability {
-			if t.Chain.AllowDelegation(t.Issuer, t.Audience, t.Expire, c) {
+			if t.Chain.AllowDelegation(t.Issuer, t.Audience, t.Topic, t.Expire, c) {
 				needCapability = slices.DeleteFunc(needCapability, func(oc Capability) bool {
 					return c == oc
 				})
@@ -258,6 +278,14 @@ func (t *DMSToken) AllowAction(ot *Token) bool {
 		return false
 	}
 
+	if ot.Action() == Broadcast {
+		for _, topic := range ot.Topic() {
+			if !slices.Contains(t.Topic, topic) {
+				return false
+			}
+		}
+	}
+
 	for _, oc := range ot.Capability() {
 		allow := false
 		for _, c := range t.Capability {
@@ -270,6 +298,7 @@ func (t *DMSToken) AllowAction(ot *Token) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -344,10 +373,48 @@ func (t *DMSToken) AllowInvocation(subject, audience did.DID, c Capability) bool
 	return false
 }
 
-func (t *Token) AllowDelegation(issuer, audience did.DID, expire uint64, c Capability) bool {
+func (t *Token) AllowBroadcast(subject did.DID, topic string, c Capability) bool {
 	switch {
 	case t.DMS != nil:
-		return t.DMS.AllowDelegation(issuer, audience, expire, c)
+		return t.DMS.AllowBroadcast(subject, topic, c)
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return false
+	}
+}
+
+func (t *DMSToken) AllowBroadcast(subject did.DID, topic string, c Capability) bool {
+	if t.Action != Broadcast {
+		return false
+	}
+
+	if !t.Subject.Equal(subject) {
+		return false
+	}
+
+	if !t.Audience.Empty() {
+		return false
+	}
+
+	if !slices.Contains(t.Topic, topic) {
+		return false
+	}
+
+	for _, granted := range t.Capability {
+		if granted.Implies(c) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (t *Token) AllowDelegation(issuer, audience did.DID, topics []string, expire uint64, c Capability) bool {
+	switch {
+	case t.DMS != nil:
+		return t.DMS.AllowDelegation(issuer, audience, topics, expire, c)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -357,7 +424,7 @@ func (t *Token) AllowDelegation(issuer, audience did.DID, expire uint64, c Capab
 	}
 }
 
-func (t *DMSToken) AllowDelegation(issuer, audience did.DID, expire uint64, c Capability) bool {
+func (t *DMSToken) AllowDelegation(issuer, audience did.DID, topics []string, expire uint64, c Capability) bool {
 	if t.Action != Delegate {
 		return false
 	}
@@ -374,6 +441,12 @@ func (t *DMSToken) AllowDelegation(issuer, audience did.DID, expire uint64, c Ca
 		return false
 	}
 
+	for _, topic := range topics {
+		if !slices.Contains(t.Topic, topic) {
+			return false
+		}
+	}
+
 	for _, granted := range t.Capability {
 		if granted.Implies(c) {
 			return true
@@ -383,10 +456,10 @@ func (t *DMSToken) AllowDelegation(issuer, audience did.DID, expire uint64, c Ca
 	return false
 }
 
-func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*Token, error) {
+func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, topics []string, expire uint64, c []Capability) (*Token, error) {
 	switch {
 	case t.DMS != nil:
-		result, err := t.DMS.Delegate(provider, subject, audience, expire, c)
+		result, err := t.DMS.Delegate(provider, subject, audience, topics, expire, c)
 		if err != nil {
 			return nil, fmt.Errorf("delegate invocation: %w", err)
 		}
@@ -401,11 +474,11 @@ func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, expir
 	}
 }
 
-func (t *DMSToken) Delegate(provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*DMSToken, error) {
-	return t.delegate(Delegate, provider, subject, audience, expire, c)
+func (t *DMSToken) Delegate(provider did.Provider, subject, audience did.DID, topics []string, expire uint64, c []Capability) (*DMSToken, error) {
+	return t.delegate(Delegate, provider, subject, audience, topics, expire, c)
 }
 
-func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*DMSToken, error) {
+func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audience did.DID, topics []string, expire uint64, c []Capability) (*DMSToken, error) {
 	if t.Action != Delegate {
 		return nil, ErrNotAuthorized
 	}
@@ -417,10 +490,11 @@ func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audie
 	}
 
 	result := &DMSToken{
+		Action:     action,
 		Issuer:     provider.DID(),
 		Subject:    subject,
 		Audience:   audience,
-		Action:     action,
+		Topic:      topics,
 		Capability: c,
 		Nonce:      nonce,
 		Expire:     expire,
@@ -460,7 +534,29 @@ func (t *Token) DelegateInvocation(provider did.Provider, subject, audience did.
 }
 
 func (t *DMSToken) DelegateInvocation(provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*DMSToken, error) {
-	return t.delegate(Invoke, provider, subject, audience, expire, c)
+	return t.delegate(Invoke, provider, subject, audience, nil, expire, c)
+}
+
+func (t *Token) DelegateBroadcast(provider did.Provider, subject did.DID, topic string, expire uint64, c []Capability) (*Token, error) {
+	switch {
+	case t.DMS != nil:
+		result, err := t.DMS.DelegateBroadcast(provider, subject, topic, expire, c)
+		if err != nil {
+			return nil, fmt.Errorf("delegate invocation: %w", err)
+		}
+
+		return &Token{DMS: result}, nil
+
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return nil, ErrBadToken
+	}
+}
+
+func (t *DMSToken) DelegateBroadcast(provider did.Provider, subject did.DID, topic string, expire uint64, c []Capability) (*DMSToken, error) {
+	return t.delegate(Broadcast, provider, subject, did.DID{}, []string{topic}, expire, c)
 }
 
 func (t *Token) Anchor(anchor did.DID) bool {
