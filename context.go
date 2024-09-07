@@ -154,11 +154,16 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide To
 	return nil
 }
 
-func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DID, topic []string, expire uint64, provide []Capability) (TokenList, error) {
+func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DID, topics []string, expire uint64, provide []Capability) (TokenList, error) {
 	nonce := make([]byte, nonceLength)
 	_, err := rand.Read(nonce)
 	if err != nil {
 		return TokenList{}, fmt.Errorf("nonce: %w", err)
+	}
+
+	topicCap := make([]Capability, 0, len(topics))
+	for _, topic := range topics {
+		topicCap = append(topicCap, Capability(topic))
 	}
 
 	result := &DMSToken{
@@ -166,7 +171,7 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 		Subject:    subject,
 		Audience:   audience,
 		Action:     action,
-		Topic:      topic,
+		Topic:      topicCap,
 		Capability: provide,
 		Nonce:      nonce,
 		Expire:     expire,
@@ -191,6 +196,11 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 		return TokenList{}, nil
 	}
 
+	topicCap := make([]Capability, 0, len(topics))
+	for _, topic := range topics {
+		topicCap = append(topicCap, Capability(topic))
+	}
+
 	var result []*Token
 
 	if selfSignOnly {
@@ -206,7 +216,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 		for _, t := range tokenList {
 			var providing []Capability
 			for _, c := range provide {
-				if t.Anchor(trustAnchor) && t.AllowDelegation(ctx.DID(), audience, topics, expire, c) {
+				if t.Anchor(trustAnchor) && t.AllowDelegation(ctx.DID(), audience, topicCap, expire, c) {
 					providing = append(providing, c)
 				}
 			}
@@ -215,7 +225,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 				continue
 			}
 
-			token, err := t.Delegate(ctx.provider, subject, audience, topics, expire, providing)
+			token, err := t.Delegate(ctx.provider, subject, audience, topicCap, expire, providing)
 			if err != nil {
 				log.Debugf("error delegating %s to %s: %s", providing, subject, err)
 				continue
@@ -226,7 +236,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 	}
 
 selfsign:
-	tokens, err := ctx.Grant(Delegate, subject, audience, nil, expire, provide)
+	tokens, err := ctx.Grant(Delegate, subject, audience, topics, expire, provide)
 	if err != nil {
 		return TokenList{}, fmt.Errorf("error granting invocation: %w", err)
 	}
@@ -316,11 +326,12 @@ func (ctx *BasicCapabilityContext) DelegateBroadcast(subject did.DID, topic stri
 }
 
 func (ctx *BasicCapabilityContext) delegateBroadcast(tokenList []*Token, anchor did.DID, subject did.DID, topic string, expire uint64, provide []Capability) []*Token {
+	topicCap := Capability(topic)
 	var result []*Token //nolint
 	for _, t := range tokenList {
 		var providing []Capability
 		for _, c := range provide {
-			if t.Anchor(anchor) && t.AllowDelegation(ctx.DID(), did.DID{}, []string{topic}, expire, c) {
+			if t.Anchor(anchor) && t.AllowDelegation(ctx.DID(), did.DID{}, []Capability{topicCap}, expire, c) {
 				providing = append(providing, c)
 			}
 		}
@@ -329,7 +340,7 @@ func (ctx *BasicCapabilityContext) delegateBroadcast(tokenList []*Token, anchor 
 			continue
 		}
 
-		token, err := t.DelegateBroadcast(ctx.provider, subject, topic, expire, providing)
+		token, err := t.DelegateBroadcast(ctx.provider, subject, topicCap, expire, providing)
 		if err != nil {
 			log.Debugf("error delegating invocation %s to %s: %s", providing, subject, err)
 			continue
@@ -512,22 +523,23 @@ func (ctx *BasicCapabilityContext) RequireBroadcast(anchor did.DID, subject cryp
 	tokenList := ctx.getSubjectTokens(subjectDID)
 	roots := ctx.getRoots()
 	requireAnchors := ctx.getRequireAnchors()
+	topicCap := Capability(topic)
 
 	for _, t := range tokenList {
 		for _, c := range require {
-			if t.Anchor(anchor) && t.AllowBroadcast(subjectDID, topic, c) {
+			if t.Anchor(anchor) && t.AllowBroadcast(subjectDID, topicCap, c) {
 				return nil
 			}
 
 			for _, anchor := range roots {
-				if t.Anchor(anchor) && t.AllowBroadcast(subjectDID, topic, c) {
+				if t.Anchor(anchor) && t.AllowBroadcast(subjectDID, topicCap, c) {
 					return nil
 				}
 			}
 
 			for _, anchor := range requireAnchors {
 				for _, rt := range ctx.getRequireTokens(anchor) {
-					if rt.AllowAction(t) && t.AllowBroadcast(subjectDID, topic, c) {
+					if rt.AllowAction(t) && t.AllowBroadcast(subjectDID, topicCap, c) {
 						return nil
 					}
 				}
