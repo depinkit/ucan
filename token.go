@@ -284,18 +284,16 @@ func (t *DMSToken) AllowAction(ot *Token) bool {
 		}
 	}
 
-	if ot.Action() == Broadcast {
-		for _, otherTopic := range ot.Topic() {
-			allow := false
-			for _, topic := range t.Topic {
-				if topic.Implies(otherTopic) {
-					allow = true
-					break
-				}
+	for _, otherTopic := range ot.Topic() {
+		allow := false
+		for _, topic := range t.Topic {
+			if topic.Implies(otherTopic) {
+				allow = true
+				break
 			}
-			if !allow {
-				return false
-			}
+		}
+		if !allow {
+			return false
 		}
 	}
 
