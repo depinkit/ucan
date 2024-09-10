@@ -16,7 +16,13 @@ import (
 
 const (
 	maxCapabilitySize = 16384
+
+	SelfSignNo SelfSignMode = iota
+	SelfSignAlso
+	SelfSignOnly
 )
+
+type SelfSignMode int
 
 type CapabilityContext interface {
 	// DID returns the context's controlling DID
@@ -55,16 +61,16 @@ type CapabilityContext interface {
 	AddRoots(trust []did.DID, require, provide TokenList) error
 
 	// Delegate creates the appropriate delegation tokens anchored in our roots
-	Delegate(subject, audience did.DID, topics []string, expire uint64, cap []Capability, selfSignOnly bool) (TokenList, error)
+	Delegate(subject, audience did.DID, topics []string, expire, depth uint64, cap []Capability, selfSign SelfSignMode) (TokenList, error)
 
 	// DelegateInvocation creates the appropriate invocation tokens anchored in anchor
-	DelegateInvocation(anchor, subject, audience did.DID, expire uint64, provide []Capability) (TokenList, error)
+	DelegateInvocation(target, subject, audience did.DID, expire uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error)
 
 	// DelegateBroadcast creates the appropriate broadcast token anchored in our roots
-	DelegateBroadcast(subject did.DID, topic string, expire uint64, provide []Capability) (TokenList, error)
+	DelegateBroadcast(subject did.DID, topic string, expire uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error)
 
 	// Grant creates the appropriate delegation tokens considering ourselves as the root
-	Grant(action Action, subject, audience did.DID, topic []string, expire uint64, provide []Capability) (TokenList, error)
+	Grant(action Action, subject, audience did.DID, topic []string, expire, depth uint64, provide []Capability) (TokenList, error)
 
 	// Start starts a token garbage collector goroutine that clears expired tokens
 	Start(gcInterval time.Duration)
@@ -154,7 +160,7 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide To
 	return nil
 }
 
-func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DID, topics []string, expire uint64, provide []Capability) (TokenList, error) {
+func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DID, topics []string, expire, depth uint64, provide []Capability) (TokenList, error) {
 	nonce := make([]byte, nonceLength)
 	_, err := rand.Read(nonce)
 	if err != nil {
@@ -175,6 +181,7 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 		Capability: provide,
 		Nonce:      nonce,
 		Expire:     expire,
+		Depth:      depth,
 	}
 
 	data, err := result.SignatureData()
@@ -191,7 +198,7 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 	return TokenList{Tokens: []*Token{{DMS: result}}}, nil
 }
 
-func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []string, expire uint64, provide []Capability, selfSignOnly bool) (TokenList, error) {
+func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []string, expire, depth uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error) {
 	if len(provide) == 0 {
 		return TokenList{}, nil
 	}
@@ -203,7 +210,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 
 	var result []*Token
 
-	if selfSignOnly {
+	if selfSign == SelfSignOnly {
 		goto selfsign
 	}
 
@@ -216,7 +223,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 		for _, t := range tokenList {
 			var providing []Capability
 			for _, c := range provide {
-				if t.Anchor(trustAnchor) && t.AllowDelegation(ctx.DID(), audience, topicCap, expire, c) {
+				if t.Anchor(trustAnchor) && t.AllowDelegation(Delegate, ctx.DID(), audience, topicCap, expire, c) {
 					providing = append(providing, c)
 				}
 			}
@@ -225,7 +232,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 				continue
 			}
 
-			token, err := t.Delegate(ctx.provider, subject, audience, topicCap, expire, providing)
+			token, err := t.Delegate(ctx.provider, subject, audience, topicCap, expire, depth, providing)
 			if err != nil {
 				log.Debugf("error delegating %s to %s: %s", providing, subject, err)
 				continue
@@ -235,8 +242,16 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 		}
 	}
 
+	if selfSign == SelfSignNo {
+		if len(result) == 0 {
+			return TokenList{}, ErrNotAuthorized
+		}
+
+		return TokenList{Tokens: result}, nil
+	}
+
 selfsign:
-	tokens, err := ctx.Grant(Delegate, subject, audience, topics, expire, provide)
+	tokens, err := ctx.Grant(Delegate, subject, audience, topics, expire, depth, provide)
 	if err != nil {
 		return TokenList{}, fmt.Errorf("error granting invocation: %w", err)
 	}
@@ -245,7 +260,7 @@ selfsign:
 	return TokenList{Tokens: result}, nil
 }
 
-func (ctx *BasicCapabilityContext) DelegateInvocation(target, subject, audience did.DID, expire uint64, provide []Capability) (TokenList, error) {
+func (ctx *BasicCapabilityContext) DelegateInvocation(target, subject, audience did.DID, expire uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error) {
 	if len(provide) == 0 {
 		return TokenList{}, nil
 	}
@@ -258,6 +273,10 @@ func (ctx *BasicCapabilityContext) DelegateInvocation(target, subject, audience 
 	tokens := ctx.delegateInvocation(tokenList, target, subject, audience, expire, provide)
 	result = append(result, tokens...)
 
+	if selfSign == SelfSignOnly {
+		goto selfsign
+	}
+
 	// then we issue tokens chained on our provide anchors as appropriate
 	for _, trustAnchor := range ctx.getProvideAnchors() {
 		tokenList := ctx.getProvideTokens(trustAnchor)
@@ -265,8 +284,16 @@ func (ctx *BasicCapabilityContext) DelegateInvocation(target, subject, audience 
 		result = append(result, tokens...)
 	}
 
-	// self-sign as well
-	selfTokens, err := ctx.Grant(Invoke, subject, audience, nil, expire, provide)
+	if selfSign == SelfSignNo {
+		if len(result) == 0 {
+			return TokenList{}, ErrNotAuthorized
+		}
+
+		return TokenList{Tokens: result}, nil
+	}
+
+selfsign:
+	selfTokens, err := ctx.Grant(Invoke, subject, audience, nil, expire, 0, provide)
 	if err != nil {
 		return TokenList{}, fmt.Errorf("error granting invocation: %w", err)
 	}
@@ -280,7 +307,7 @@ func (ctx *BasicCapabilityContext) delegateInvocation(tokenList []*Token, anchor
 	for _, t := range tokenList {
 		var providing []Capability
 		for _, c := range provide {
-			if t.Anchor(anchor) && t.AllowDelegation(ctx.DID(), audience, nil, expire, c) {
+			if t.Anchor(anchor) && t.AllowDelegation(Invoke, ctx.DID(), audience, nil, expire, c) {
 				providing = append(providing, c)
 			}
 		}
@@ -301,12 +328,16 @@ func (ctx *BasicCapabilityContext) delegateInvocation(tokenList []*Token, anchor
 	return result
 }
 
-func (ctx *BasicCapabilityContext) DelegateBroadcast(subject did.DID, topic string, expire uint64, provide []Capability) (TokenList, error) {
+func (ctx *BasicCapabilityContext) DelegateBroadcast(subject did.DID, topic string, expire uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error) {
 	if len(provide) == 0 {
 		return TokenList{}, nil
 	}
 
 	var result []*Token
+
+	if selfSign == SelfSignOnly {
+		goto selfsign
+	}
 
 	// first we issue tokens chained on our provide anchors as appropriate
 	for _, trustAnchor := range ctx.getProvideAnchors() {
@@ -315,8 +346,16 @@ func (ctx *BasicCapabilityContext) DelegateBroadcast(subject did.DID, topic stri
 		result = append(result, tokens...)
 	}
 
-	// self-sign as well
-	selfTokens, err := ctx.Grant(Broadcast, subject, did.DID{}, []string{topic}, expire, provide)
+	if selfSign == SelfSignNo {
+		if len(result) == 0 {
+			return TokenList{}, ErrNotAuthorized
+		}
+
+		return TokenList{Tokens: result}, nil
+	}
+
+selfsign:
+	selfTokens, err := ctx.Grant(Broadcast, subject, did.DID{}, []string{topic}, expire, 0, provide)
 	if err != nil {
 		return TokenList{}, fmt.Errorf("error granting broadcast: %w", err)
 	}
@@ -331,7 +370,7 @@ func (ctx *BasicCapabilityContext) delegateBroadcast(tokenList []*Token, anchor 
 	for _, t := range tokenList {
 		var providing []Capability
 		for _, c := range provide {
-			if t.Anchor(anchor) && t.AllowDelegation(ctx.DID(), did.DID{}, []Capability{topicCap}, expire, c) {
+			if t.Anchor(anchor) && t.AllowDelegation(Broadcast, ctx.DID(), did.DID{}, []Capability{topicCap}, expire, c) {
 				providing = append(providing, c)
 			}
 		}
@@ -572,7 +611,7 @@ func (ctx *BasicCapabilityContext) Provide(target did.DID, subject crypto.ID, au
 		return nil, fmt.Errorf("no invocation capabilities: %w", ErrNotAuthorized)
 	}
 
-	invocation, err = ctx.DelegateInvocation(target, subjectDID, audienceDID, expire, invoke)
+	invocation, err = ctx.DelegateInvocation(target, subjectDID, audienceDID, expire, invoke, SelfSignAlso)
 	if err != nil {
 		return nil, fmt.Errorf("cannot provide invocation tokens: %w", err)
 	}
@@ -587,7 +626,7 @@ func (ctx *BasicCapabilityContext) Provide(target did.DID, subject crypto.ID, au
 		goto marshal
 	}
 
-	delegation, err = ctx.Delegate(target, subjectDID, nil, expire, provide, true)
+	delegation, err = ctx.Delegate(target, subjectDID, nil, expire, 1, provide, SelfSignOnly)
 	if err != nil {
 		return nil, fmt.Errorf("cannot provide delegation tokens: %w", err)
 	}
@@ -618,7 +657,7 @@ func (ctx *BasicCapabilityContext) ProvideBroadcast(subject crypto.ID, topic str
 		return nil, fmt.Errorf("DID for subject: %w", err)
 	}
 
-	broadcast, err := ctx.DelegateBroadcast(subjectDID, topic, expire, provide)
+	broadcast, err := ctx.DelegateBroadcast(subjectDID, topic, expire, provide, SelfSignAlso)
 	if err != nil {
 		return nil, fmt.Errorf("cannot provide broadcast tokens: %w", err)
 	}

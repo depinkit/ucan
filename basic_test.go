@@ -45,6 +45,7 @@ func makeActorCapabilityContext(t *testing.T, rootCtx CapabilityContext, actorCa
 		did.DID{},
 		nil,
 		makeExpiry(120*time.Second),
+		0,
 		actorCap,
 	)
 	require.NoError(t, err, "granting capabilities to actor")
@@ -68,6 +69,7 @@ func allowReciprocal(t *testing.T, actor, root, otherRoot CapabilityContext, act
 		did.DID{},
 		nil,
 		makeExpiry(120*time.Second),
+		0,
 		actorCap)
 	require.NoError(t, err, "granting reciprocal capabilities")
 
@@ -82,6 +84,7 @@ func allowBroadcast(t *testing.T, actor1, actor2, root1, root2 CapabilityContext
 		did.DID{},
 		[]string{topic},
 		makeExpiry(120*time.Second),
+		0,
 		actorCap,
 	)
 	require.NoError(t, err, "granting broadcast capability")
@@ -95,6 +98,7 @@ func allowBroadcast(t *testing.T, actor1, actor2, root1, root2 CapabilityContext
 		did.DID{},
 		[]string{topic},
 		makeExpiry(120*time.Second),
+		0,
 		actorCap,
 	)
 	require.NoError(t, err, "granting broadcast capability")
@@ -336,4 +340,59 @@ func TestBroadcastDistrust(t *testing.T) {
 		[]Capability{capability},
 	)
 	require.Error(t, err, "require")
+}
+
+func TestDelegationDepth(t *testing.T) {
+	root1 := makeRootCapabilityContext(t)
+	root2 := makeRootCapabilityContext(t)
+	root3 := makeRootCapabilityContext(t)
+
+	expiry := makeExpiry(120 * time.Second)
+	capabilities := []Capability{Capability("/test")}
+	topic := "/broadcast/test"
+	topics := []string{topic}
+
+	tokens, err := root1.Grant(
+		Delegate,
+		root2.DID(),
+		did.DID{},
+		topics,
+		expiry,
+		1,
+		capabilities,
+	)
+	require.NoError(t, err, "grant")
+
+	err = root2.AddRoots(nil, TokenList{}, tokens)
+	require.NoError(t, err, "provide anchor")
+
+	_, err = root2.DelegateInvocation(
+		root3.DID(),
+		root3.DID(),
+		did.DID{},
+		expiry,
+		capabilities,
+		SelfSignNo,
+	)
+	require.NoError(t, err, "delegate invocation")
+
+	_, err = root2.DelegateBroadcast(
+		root3.DID(),
+		topic,
+		expiry,
+		capabilities,
+		SelfSignNo,
+	)
+	require.NoError(t, err, "delegate invocation")
+
+	_, err = root2.Delegate(
+		root3.DID(),
+		did.DID{},
+		topics,
+		expiry,
+		0,
+		capabilities,
+		SelfSignNo,
+	)
+	require.Error(t, err, "delegate")
 }

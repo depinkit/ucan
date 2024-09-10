@@ -39,6 +39,7 @@ type DMSToken struct {
 	Capability []Capability `json:"cap"`
 	Nonce      []byte       `json:"nonce"`
 	Expire     uint64       `json:"exp"`
+	Depth      uint64       `json:"depth,omitempty"`
 	Chain      *Token       `json:"chain,omitempty"`
 	Signature  []byte       `json:"sig,omitempty"`
 }
@@ -176,9 +177,13 @@ func (t *Token) Action() Action {
 }
 
 func (t *Token) Verify(trust did.TrustContext, now uint64) error {
+	return t.verify(trust, now, 0)
+}
+
+func (t *Token) verify(trust did.TrustContext, now, depth uint64) error {
 	switch {
 	case t.DMS != nil:
-		return t.DMS.Verify(trust, now)
+		return t.DMS.verify(trust, now, depth)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -187,9 +192,13 @@ func (t *Token) Verify(trust did.TrustContext, now uint64) error {
 	}
 }
 
-func (t *DMSToken) Verify(trust did.TrustContext, now uint64) error {
+func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64) error {
 	if t.ExpireBefore(now) {
 		return ErrCapabilityExpired
+	}
+
+	if t.Depth > 0 && depth > t.Depth {
+		return ErrNotAuthorized
 	}
 
 	if t.Chain != nil {
@@ -201,7 +210,7 @@ func (t *DMSToken) Verify(trust did.TrustContext, now uint64) error {
 			return ErrCapabilityExpired
 		}
 
-		if err := t.Chain.Verify(trust, now); err != nil {
+		if err := t.Chain.verify(trust, now, depth+1); err != nil {
 			return err
 		}
 
@@ -211,7 +220,7 @@ func (t *DMSToken) Verify(trust did.TrustContext, now uint64) error {
 
 		needCapability := slices.Clone(t.Capability)
 		for _, c := range needCapability {
-			if t.Chain.AllowDelegation(t.Issuer, t.Audience, t.Topic, t.Expire, c) {
+			if t.Chain.allowDelegation(t.Issuer, t.Audience, t.Topic, t.Expire, c) {
 				needCapability = slices.DeleteFunc(needCapability, func(oc Capability) bool {
 					return c == oc
 				})
@@ -265,6 +274,13 @@ func (t *DMSToken) AllowAction(ot *Token) bool {
 
 	if !ot.Anchor(t.Subject) {
 		return false
+	}
+
+	if t.Depth > 0 {
+		depth, ok := ot.AnchorDepth(t.Subject)
+		if ok && depth > t.Depth {
+			return false
+		}
 	}
 
 	if !t.Audience.Empty() && !t.Audience.Equal(ot.Audience()) {
@@ -417,10 +433,10 @@ func (t *DMSToken) AllowBroadcast(subject did.DID, topic Capability, c Capabilit
 	return false
 }
 
-func (t *Token) AllowDelegation(issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
+func (t *Token) AllowDelegation(action Action, issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
 	switch {
 	case t.DMS != nil:
-		return t.DMS.AllowDelegation(issuer, audience, topics, expire, c)
+		return t.DMS.AllowDelegation(action, issuer, audience, topics, expire, c)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -430,7 +446,35 @@ func (t *Token) AllowDelegation(issuer, audience did.DID, topics []Capability, e
 	}
 }
 
-func (t *DMSToken) AllowDelegation(issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
+func (t *DMSToken) AllowDelegation(action Action, issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
+	if action == Delegate {
+		if !t.verifyDepth(2) {
+			// certificate would be dead end with 1
+			return false
+		}
+	} else {
+		if !t.verifyDepth(1) {
+			return false
+		}
+	}
+
+	return t.allowDelegation(issuer, audience, topics, expire, c)
+}
+
+func (t *Token) allowDelegation(issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
+	switch {
+	case t.DMS != nil:
+		return t.DMS.allowDelegation(issuer, audience, topics, expire, c)
+
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return false
+	}
+}
+
+func (t *DMSToken) allowDelegation(issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
 	if t.Action != Delegate {
 		return false
 	}
@@ -470,10 +514,34 @@ func (t *DMSToken) AllowDelegation(issuer, audience did.DID, topics []Capability
 	return false
 }
 
-func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, topics []Capability, expire uint64, c []Capability) (*Token, error) {
+func (t *Token) verifyDepth(depth uint64) bool {
 	switch {
 	case t.DMS != nil:
-		result, err := t.DMS.Delegate(provider, subject, audience, topics, expire, c)
+		return t.DMS.verifyDepth(depth)
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return false
+	}
+}
+
+func (t *DMSToken) verifyDepth(depth uint64) bool {
+	if t.Depth > 0 && depth > t.Depth {
+		return false
+	}
+
+	if t.Chain != nil {
+		return t.Chain.verifyDepth(depth + 1)
+	}
+
+	return true
+}
+
+func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*Token, error) {
+	switch {
+	case t.DMS != nil:
+		result, err := t.DMS.Delegate(provider, subject, audience, topics, expire, depth, c)
 		if err != nil {
 			return nil, fmt.Errorf("delegate invocation: %w", err)
 		}
@@ -488,13 +556,24 @@ func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, topic
 	}
 }
 
-func (t *DMSToken) Delegate(provider did.Provider, subject, audience did.DID, topics []Capability, expire uint64, c []Capability) (*DMSToken, error) {
-	return t.delegate(Delegate, provider, subject, audience, topics, expire, c)
+func (t *DMSToken) Delegate(provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*DMSToken, error) {
+	return t.delegate(Delegate, provider, subject, audience, topics, expire, depth, c)
 }
 
-func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audience did.DID, topics []Capability, expire uint64, c []Capability) (*DMSToken, error) {
+func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*DMSToken, error) {
 	if t.Action != Delegate {
 		return nil, ErrNotAuthorized
+	}
+
+	if action == Delegate {
+		if !t.verifyDepth(2) {
+			// certificate would be dead end with 1
+			return nil, ErrNotAuthorized
+		}
+	} else {
+		if !t.verifyDepth(1) {
+			return nil, ErrNotAuthorized
+		}
 	}
 
 	nonce := make([]byte, nonceLength)
@@ -512,6 +591,7 @@ func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audie
 		Capability: c,
 		Nonce:      nonce,
 		Expire:     expire,
+		Depth:      depth,
 		Chain:      &Token{DMS: t},
 	}
 
@@ -548,7 +628,7 @@ func (t *Token) DelegateInvocation(provider did.Provider, subject, audience did.
 }
 
 func (t *DMSToken) DelegateInvocation(provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*DMSToken, error) {
-	return t.delegate(Invoke, provider, subject, audience, nil, expire, c)
+	return t.delegate(Invoke, provider, subject, audience, nil, expire, 0, c)
 }
 
 func (t *Token) DelegateBroadcast(provider did.Provider, subject did.DID, topic Capability, expire uint64, c []Capability) (*Token, error) {
@@ -570,7 +650,7 @@ func (t *Token) DelegateBroadcast(provider did.Provider, subject did.DID, topic 
 }
 
 func (t *DMSToken) DelegateBroadcast(provider did.Provider, subject did.DID, topic Capability, expire uint64, c []Capability) (*DMSToken, error) {
-	return t.delegate(Broadcast, provider, subject, did.DID{}, []Capability{topic}, expire, c)
+	return t.delegate(Broadcast, provider, subject, did.DID{}, []Capability{topic}, expire, 0, c)
 }
 
 func (t *Token) Anchor(anchor did.DID) bool {
@@ -596,6 +676,35 @@ func (t *DMSToken) Anchor(anchor did.DID) bool {
 	}
 
 	return false
+}
+
+func (t *Token) AnchorDepth(anchor did.DID) (uint64, bool) {
+	switch {
+	case t.DMS != nil:
+		return t.DMS.AnchorDepth(anchor)
+
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return 0, false
+	}
+}
+
+func (t *DMSToken) AnchorDepth(anchor did.DID) (depth uint64, have bool) {
+	if t.Issuer.Equal(anchor) {
+		have = true
+		depth = 0
+	}
+
+	if t.Chain != nil {
+		if chainDepth, chainHave := t.Chain.AnchorDepth(anchor); chainHave {
+			have = true
+			depth = chainDepth + 1
+		}
+	}
+
+	return depth, have
 }
 
 func (t *Token) Expired() bool {
