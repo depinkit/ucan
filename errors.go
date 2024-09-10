@@ -9,6 +9,7 @@ var (
 	ErrCapabilityExpired = errors.New("capability expired")
 	ErrBadToken          = errors.New("bad token")
 	ErrTooBig            = errors.New("capability blob too big")
+	ErrBadContext        = errors.New("bad context")
 
 	ErrTODO = errors.New("TODO")
 )
