@@ -198,12 +198,12 @@ func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64) error {
 	}
 
 	if t.Depth > 0 && depth > t.Depth {
-		return ErrNotAuthorized
+		return fmt.Errorf("max token depth exceeded: %w", ErrNotAuthorized)
 	}
 
 	if t.Chain != nil {
 		if t.Chain.Action() != Delegate {
-			return ErrNotAuthorized
+			return fmt.Errorf("verify: chain does not allow delegation: %w", ErrNotAuthorized)
 		}
 
 		if t.Chain.ExpireBefore(t.Expire) {
@@ -215,11 +215,11 @@ func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64) error {
 		}
 
 		if !t.Issuer.Equal(t.Chain.Subject()) {
-			return ErrNotAuthorized
+			return fmt.Errorf("verify: issuer/chain subject misnmatch: %w", ErrNotAuthorized)
 		}
 
 		needCapability := slices.Clone(t.Capability)
-		for _, c := range needCapability {
+		for _, c := range t.Capability {
 			if t.Chain.allowDelegation(t.Issuer, t.Audience, t.Topic, t.Expire, c) {
 				needCapability = slices.DeleteFunc(needCapability, func(oc Capability) bool {
 					return c == oc
@@ -230,7 +230,7 @@ func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64) error {
 			}
 		}
 		if len(needCapability) > 0 {
-			return ErrNotAuthorized
+			return fmt.Errorf("verify: capabilities are not allowed by the chain: %w", ErrNotAuthorized)
 		}
 	}
 
