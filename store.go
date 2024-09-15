@@ -67,5 +67,18 @@ func LoadCapabilityContext(trust did.TrustContext, rd io.Reader) (CapabilityCont
 		return nil, fmt.Errorf("decoding capability context view: %w", err)
 	}
 
-	return NewCapabilityContext(trust, view.DID, view.Roots, view.Require, view.Provide)
+	var require, provide TokenList
+	for _, t := range view.Require.Tokens {
+		if !t.Expired() {
+			require.Tokens = append(require.Tokens, t)
+		}
+	}
+
+	for _, t := range view.Provide.Tokens {
+		if !t.Expired() {
+			provide.Tokens = append(provide.Tokens, t)
+		}
+	}
+
+	return NewCapabilityContext(trust, view.DID, view.Roots, require, provide)
 }
