@@ -30,25 +30,13 @@ func SaveCapabilityContext(ctx CapabilityContext, wr io.Writer) error {
 }
 
 func saveCapabilityContext(ctx *BasicCapabilityContext, wr io.Writer) error {
-	var require, provide []*Token
-
-	roots := ctx.getRoots()
-
-	for _, anchor := range ctx.getRequireAnchors() {
-		tokenList := ctx.getRequireTokens(anchor)
-		require = append(require, tokenList...)
-	}
-
-	for _, anchor := range ctx.getProvideAnchors() {
-		tokenList := ctx.getProvideTokens(anchor)
-		provide = append(provide, tokenList...)
-	}
+	roots, require, provide := ctx.ListRoots()
 
 	view := CapabilityContextView{
 		DID:     ctx.provider.DID(),
 		Roots:   roots,
-		Require: TokenList{Tokens: require},
-		Provide: TokenList{Tokens: provide},
+		Require: require,
+		Provide: provide,
 	}
 
 	encoder := json.NewEncoder(wr)

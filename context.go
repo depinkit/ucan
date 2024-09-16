@@ -57,8 +57,14 @@ type CapabilityContext interface {
 	// to broadcast to a topic
 	ProvideBroadcast(subject crypto.ID, topic string, expire uint64, broadcast []Capability) ([]byte, error)
 
-	// AddRoots adds trust anchors and/or capabilities derived from our anchors
+	// AddRoots adds trust anchors
 	AddRoots(trust []did.DID, require, provide TokenList) error
+
+	// ListRoots list the current trust anchors
+	ListRoots() ([]did.DID, TokenList, TokenList)
+
+	// RemoveRoots removes the specified trust anchors
+	RemoveRoots(trust []did.DID, require, provide TokenList)
 
 	// Delegate creates the appropriate delegation tokens anchored in our roots
 	Delegate(subject, audience did.DID, topics []string, expire, depth uint64, cap []Capability, selfSign SelfSignMode) (TokenList, error)
@@ -158,6 +164,61 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide To
 	}
 
 	return nil
+}
+
+func (ctx *BasicCapabilityContext) ListRoots() ([]did.DID, TokenList, TokenList) {
+	var require, provide []*Token
+
+	roots := ctx.getRoots()
+
+	for _, anchor := range ctx.getRequireAnchors() {
+		tokenList := ctx.getRequireTokens(anchor)
+		require = append(require, tokenList...)
+	}
+
+	for _, anchor := range ctx.getProvideAnchors() {
+		tokenList := ctx.getProvideTokens(anchor)
+		provide = append(provide, tokenList...)
+	}
+
+	return roots, TokenList{Tokens: require}, TokenList{Tokens: provide}
+}
+
+func (ctx *BasicCapabilityContext) RemoveRoots(trust []did.DID, require, provide TokenList) {
+	ctx.mx.Lock()
+	defer ctx.mx.Unlock()
+
+	for _, root := range trust {
+		delete(ctx.roots, root)
+	}
+
+	for _, t := range require.Tokens {
+		tokenList, ok := ctx.require[t.Issuer()]
+		if ok {
+			tokenList = slices.DeleteFunc(tokenList, func(ot *Token) bool {
+				return bytes.Equal(t.Nonce(), ot.Nonce())
+			})
+			if len(tokenList) > 0 {
+				ctx.require[t.Issuer()] = tokenList
+			} else {
+				delete(ctx.require, t.Issuer())
+			}
+		}
+	}
+
+	for _, t := range provide.Tokens {
+		tokenList, ok := ctx.provide[t.Issuer()]
+		if ok {
+			tokenList = slices.DeleteFunc(tokenList, func(ot *Token) bool {
+				return bytes.Equal(t.Nonce(), ot.Nonce())
+			})
+			if len(tokenList) > 0 {
+				ctx.provide[t.Issuer()] = tokenList
+			} else {
+				delete(ctx.provide, t.Issuer())
+			}
+		}
+	}
 }
 
 func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DID, topics []string, expire, depth uint64, provide []Capability) (TokenList, error) {
