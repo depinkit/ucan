@@ -489,6 +489,7 @@ func (ctx *BasicCapabilityContext) Consume(origin did.DID, data []byte) error {
 			}
 		}
 
+		log.Debugf("ignoring token %+v", *t)
 		continue
 
 	verify:
