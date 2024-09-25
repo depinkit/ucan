@@ -283,8 +283,14 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 
 		for _, t := range tokenList {
 			var providing []Capability
+			definitiveExpire := expire
+
+			if definitiveExpire == 0 {
+				definitiveExpire = t.Expire()
+			}
+
 			for _, c := range provide {
-				if t.Anchor(trustAnchor) && t.AllowDelegation(Delegate, ctx.DID(), audience, topicCap, expire, c) {
+				if t.Anchor(trustAnchor) && t.AllowDelegation(Delegate, ctx.DID(), audience, topicCap, definitiveExpire, c) {
 					providing = append(providing, c)
 				}
 			}
@@ -293,7 +299,7 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 				continue
 			}
 
-			token, err := t.Delegate(ctx.provider, subject, audience, topicCap, expire, depth, providing)
+			token, err := t.Delegate(ctx.provider, subject, audience, topicCap, definitiveExpire, depth, providing)
 			if err != nil {
 				log.Debugf("error delegating %s to %s: %s", providing, subject, err)
 				continue
