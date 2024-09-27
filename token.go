@@ -337,7 +337,7 @@ func (t *DMSToken) Subsumes(ot *Token) bool {
 	if t.Issuer.Equal(ot.Issuer()) &&
 		t.Subject.Equal(ot.Subject()) &&
 		t.Audience.Equal(ot.Audience()) &&
-		t.Expire > ot.Expire() {
+		t.Expire >= ot.Expire() {
 	loop:
 		for _, oc := range ot.Capability() {
 			for _, c := range t.Capability {
