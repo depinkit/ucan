@@ -32,6 +32,21 @@ const (
 
 type SelfSignMode int
 
+// CapabilityContext exposes the necessary functionalities to manage capabilities
+// between different contexts. The work is based on UCAN but we're not
+// strictly following its specs.
+//
+// TODO: explain side-chains
+//
+// TODO: explain anchor concept
+//
+// Some concepts:
+//
+// - Issuer: the one delegating/granting/invoking capabilities. Responsible for signing the token.
+// - Audience: is the resource which the capabilities can be applied upon.
+// - Subject:
+//   - is the receiver, when delegating/granting capabilities
+//   - is the invoker, when invoking capabilities
 type CapabilityContext interface {
 	// DID returns the context's controlling DID
 	DID() did.DID
@@ -39,7 +54,8 @@ type CapabilityContext interface {
 	// Trust returns the context's did trust context
 	Trust() did.TrustContext
 
-	// Consume ingests the provided capability tokens
+	// Consume ingests some or all of the provided capability tokens.
+	// It'll only return an error if all provided capabilities were not ingested.
 	Consume(origin did.DID, cap []byte) error
 
 	// Discard discards previously consumed capability tokens
@@ -49,6 +65,8 @@ type CapabilityContext interface {
 	// the subject to the audience, with an appropriate anchor
 	// An empty list will mean that no capabilities are required and is vacuously
 	// true.
+	//
+	// TODO (if necessary): create a RequireAll() since this method is basically a RequireAny()
 	Require(anchor did.DID, subject crypto.ID, audience crypto.ID, require []Capability) error
 
 	// RequireBroadcast ensures that at least one of the capabilities is delegated
@@ -66,6 +84,10 @@ type CapabilityContext interface {
 	ProvideBroadcast(subject crypto.ID, topic string, expire uint64, broadcast []Capability) ([]byte, error)
 
 	// AddRoots adds trust anchors
+	//
+	// require: regards to side-chains. It'll be used as one of the sources of truth when an entity is claiming having certain capabilities.
+	//
+	// provide: regards to the capabilities that we can delegate.
 	AddRoots(trust []did.DID, require, provide TokenList) error
 
 	// ListRoots list the current trust anchors
@@ -307,6 +329,11 @@ func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []
 				continue
 			}
 
+			if len(provide) > len(providing) {
+				// attempt to widen caps
+				continue
+			}
+
 			token, err := t.Delegate(ctx.provider, subject, audience, topicCap, definitiveExpire, depth, providing)
 			if err != nil {
 				log.Debugf("error delegating %s to %s: %s", providing, subject, err)
@@ -391,6 +418,11 @@ func (ctx *BasicCapabilityContext) delegateInvocation(tokenList []*Token, anchor
 			continue
 		}
 
+		if len(provide) > len(providing) {
+			// attempt to widen caps
+			continue
+		}
+
 		token, err := t.DelegateInvocation(ctx.provider, subject, audience, expire, providing)
 		if err != nil {
 			log.Debugf("error delegating invocation %s to %s: %s", providing, subject, err)
@@ -425,7 +457,6 @@ func (ctx *BasicCapabilityContext) DelegateBroadcast(subject did.DID, topic stri
 		if len(result) == 0 {
 			return TokenList{}, ErrNotAuthorized
 		}
-
 		return TokenList{Tokens: result}, nil
 	}
 
@@ -451,6 +482,11 @@ func (ctx *BasicCapabilityContext) delegateBroadcast(tokenList []*Token, anchor 
 		}
 
 		if len(providing) == 0 {
+			continue
+		}
+
+		if len(provide) > len(providing) {
+			// attempt to widen caps
 			continue
 		}
 
