@@ -48,6 +48,9 @@ type SelfSignMode int
 //   - is the receiver, when delegating/granting capabilities
 //   - is the invoker, when invoking capabilities
 type CapabilityContext interface {
+	// Name returns the context name
+	Name() string
+
 	// DID returns the context's controlling DID
 	DID() did.DID
 
@@ -88,10 +91,10 @@ type CapabilityContext interface {
 	// require: regards to side-chains. It'll be used as one of the sources of truth when an entity is claiming having certain capabilities.
 	//
 	// provide: regards to the capabilities that we can delegate.
-	AddRoots(trust []did.DID, require, provide TokenList) error
+	AddRoots(trust []did.DID, require, provide TokenList, revoke TokenList) error
 
 	// ListRoots list the current trust anchors
-	ListRoots() ([]did.DID, TokenList, TokenList)
+	ListRoots() ([]did.DID, TokenList, TokenList, TokenList)
 
 	// RemoveRoots removes the specified trust anchors
 	RemoveRoots(trust []did.DID, require, provide TokenList)
@@ -108,6 +111,9 @@ type CapabilityContext interface {
 	// Grant creates the appropriate delegation tokens considering ourselves as the root
 	Grant(action Action, subject, audience did.DID, topic []string, expire, depth uint64, provide []Capability) (TokenList, error)
 
+	// Revoke creates a revocation for the provided token (token=(iss+sub+nonce))
+	Revoke(*Token) (*Token, error)
+
 	// Start starts a token garbage collector goroutine that clears expired tokens
 	Start(gcInterval time.Duration)
 	// Stop stops a previously started gc goroutine
@@ -116,24 +122,28 @@ type CapabilityContext interface {
 
 type BasicCapabilityContext struct {
 	mx       sync.Mutex
+	name     string
 	provider did.Provider
 	trust    did.TrustContext
 	roots    map[did.DID]struct{} // our root anchors of trust
 	require  map[did.DID][]*Token // our acceptance side-roots
 	provide  map[did.DID][]*Token // root capabilities -> tokens
 	tokens   map[did.DID][]*Token // our context dependent capabilities; subject ->  tokens
+	revoke   *RevocationSet       // revocation tokens
 
 	stop func()
 }
 
 var _ CapabilityContext = (*BasicCapabilityContext)(nil)
 
-func NewCapabilityContext(trust did.TrustContext, ctxDID did.DID, roots []did.DID, require, provide TokenList) (CapabilityContext, error) {
+func newCapabilityContext(name string, trust did.TrustContext, ctxDID did.DID, roots []did.DID, require, provide TokenList, revoke TokenList) (*BasicCapabilityContext, error) {
 	ctx := &BasicCapabilityContext{
+		name:    name,
 		trust:   trust,
 		roots:   make(map[did.DID]struct{}),
 		require: make(map[did.DID][]*Token),
 		provide: make(map[did.DID][]*Token),
+		revoke:  &RevocationSet{revoked: make(map[string]*Token)},
 		tokens:  make(map[did.DID][]*Token),
 	}
 
@@ -144,11 +154,23 @@ func NewCapabilityContext(trust did.TrustContext, ctxDID did.DID, roots []did.DI
 
 	ctx.provider = p
 
-	if err := ctx.AddRoots(roots, require, provide); err != nil {
+	if err := ctx.AddRoots(roots, require, provide, revoke); err != nil {
 		return nil, fmt.Errorf("new capability context: %w", err)
 	}
 
 	return ctx, nil
+}
+
+func NewCapabilityContext(trust did.TrustContext, ctxDID did.DID, roots []did.DID, require, provide TokenList, revoke TokenList) (CapabilityContext, error) {
+	return newCapabilityContext("dms", trust, ctxDID, roots, require, provide, revoke)
+}
+
+func NewCapabilityContextWithName(name string, trust did.TrustContext, ctxDID did.DID, roots []did.DID, require, provide TokenList, revoke TokenList) (CapabilityContext, error) {
+	return newCapabilityContext(name, trust, ctxDID, roots, require, provide, revoke)
+}
+
+func (ctx *BasicCapabilityContext) Name() string {
+	return ctx.name
 }
 
 func (ctx *BasicCapabilityContext) DID() did.DID {
@@ -173,12 +195,23 @@ func (ctx *BasicCapabilityContext) Stop() {
 	}
 }
 
-func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide TokenList) error {
+func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide, revoke TokenList) error {
 	ctx.addRoots(roots)
 
 	now := uint64(time.Now().UnixNano())
+	for _, t := range revoke.Tokens {
+		if t.Action() != Revoke {
+			return fmt.Errorf("verify token: %w", ErrBadToken)
+		}
+		if err := t.Verify(ctx.trust, now, ctx.revoke); err != nil {
+			return fmt.Errorf("verify token: %w", err)
+		}
+
+		ctx.consumeRevokeToken(t)
+	}
+
 	for _, t := range require.Tokens {
-		if err := t.Verify(ctx.trust, now); err != nil {
+		if err := t.Verify(ctx.trust, now, ctx.revoke); err != nil {
 			return fmt.Errorf("verify token: %w", err)
 		}
 
@@ -186,7 +219,7 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide To
 	}
 
 	for _, t := range provide.Tokens {
-		if err := t.Verify(ctx.trust, now); err != nil {
+		if err := t.Verify(ctx.trust, now, ctx.revoke); err != nil {
 			return fmt.Errorf("verify token: %w", err)
 		}
 
@@ -196,8 +229,8 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide To
 	return nil
 }
 
-func (ctx *BasicCapabilityContext) ListRoots() ([]did.DID, TokenList, TokenList) {
-	var require, provide []*Token
+func (ctx *BasicCapabilityContext) ListRoots() ([]did.DID, TokenList, TokenList, TokenList) {
+	var require, provide, revoke []*Token
 
 	roots := ctx.getRoots()
 
@@ -211,7 +244,8 @@ func (ctx *BasicCapabilityContext) ListRoots() ([]did.DID, TokenList, TokenList)
 		provide = append(provide, tokenList...)
 	}
 
-	return roots, TokenList{Tokens: require}, TokenList{Tokens: provide}
+	revoke = ctx.revoke.List()
+	return roots, TokenList{Tokens: require}, TokenList{Tokens: provide}, TokenList{Tokens: revoke}
 }
 
 func (ctx *BasicCapabilityContext) RemoveRoots(trust []did.DID, require, provide TokenList) {
@@ -287,6 +321,33 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 
 	result.Signature = sig
 	return TokenList{Tokens: []*Token{{DMS: result}}}, nil
+}
+
+func (ctx *BasicCapabilityContext) Revoke(token *Token) (*Token, error) {
+	if !ctx.DID().Equal(token.Issuer()) {
+		return nil, ErrNotAuthorized
+	}
+
+	revocationToken := &DMSToken{
+		Action:  Revoke,
+		Issuer:  token.Issuer(),
+		Subject: token.Subject(),
+		Nonce:   token.Nonce(),
+		Expire:  token.Expiry(),
+	}
+
+	data, err := revocationToken.SignatureData()
+	if err != nil {
+		return nil, fmt.Errorf("revoke: %w", err)
+	}
+
+	sig, err := ctx.provider.Sign(data)
+	if err != nil {
+		return nil, fmt.Errorf("sign: %w", err)
+	}
+
+	revocationToken.Signature = sig
+	return &Token{DMS: revocationToken}, nil
 }
 
 func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []string, expire, depth uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error) {
@@ -543,7 +604,7 @@ func (ctx *BasicCapabilityContext) Consume(origin did.DID, data []byte) error {
 		continue
 
 	verify:
-		if err := t.Verify(ctx.trust, now); err != nil {
+		if err := t.Verify(ctx.trust, now, ctx.revoke); err != nil {
 			log.Warnf("failed to verify token issued by %s: %s", t.Issuer(), err)
 			continue
 		}
@@ -615,6 +676,10 @@ func (ctx *BasicCapabilityContext) consumeSubjectToken(t *Token) {
 	tokenList := ctx.tokens[subject]
 	tokenList = append(tokenList, t)
 	ctx.tokens[subject] = tokenList
+}
+
+func (ctx *BasicCapabilityContext) consumeRevokeToken(t *Token) {
+	ctx.revoke.Revoke(t)
 }
 
 func (ctx *BasicCapabilityContext) Require(anchor did.DID, subject crypto.ID, audience crypto.ID, cap []Capability) error {
@@ -930,6 +995,8 @@ func (ctx *BasicCapabilityContext) gcTokens() {
 			ctx.provide[anchor] = tokens
 		}
 	}
+
+	ctx.revoke.gc(now)
 
 	for subject, tokens := range ctx.tokens {
 		tokens = slices.DeleteFunc(slices.Clone(tokens), func(t *Token) bool {

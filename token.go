@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"gitlab.com/nunet/device-management-service/lib/did"
@@ -24,7 +25,7 @@ const (
 	Invoke    Action = "invoke"
 	Delegate  Action = "delegate"
 	Broadcast Action = "broadcast"
-	// Revoke   Action = "revoke" // TODO
+	Revoke    Action = "revoke"
 
 	nonceLength = 12 // 96 bits
 )
@@ -58,6 +59,74 @@ type BYOToken struct {
 
 type TokenList struct {
 	Tokens []*Token `json:"tok,omitempty"`
+}
+
+type RevocationSet struct {
+	lk      sync.RWMutex
+	revoked map[string]*Token
+}
+
+func (r *RevocationSet) Revoked(key string) bool {
+	r.lk.RLock()
+	defer r.lk.RUnlock()
+
+	_, revoked := r.revoked[key]
+	return revoked
+}
+
+func (r *RevocationSet) Revoke(t *Token) {
+	r.lk.Lock()
+	defer r.lk.Unlock()
+
+	r.revoked[t.RevocationKey()] = t
+}
+
+func (r *RevocationSet) List() []*Token {
+	r.lk.RLock()
+	defer r.lk.RUnlock()
+
+	result := make([]*Token, 0, len(r.revoked))
+	now := uint64(time.Now().UnixNano())
+	for _, t := range r.revoked {
+		if t.ExpireBefore(now) {
+			continue
+		}
+
+		result = append(result, t)
+	}
+
+	return result
+}
+
+func (r *RevocationSet) gc(now uint64) {
+	r.lk.Lock()
+	defer r.lk.Unlock()
+
+	for key, token := range r.revoked {
+		if token.ExpireBefore(now) {
+			delete(r.revoked, key)
+		}
+	}
+}
+
+func (t *Token) RevocationKey() string {
+	switch {
+	case t.DMS != nil:
+		return t.DMS.RevocationKey()
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return ""
+	}
+}
+
+func (t *DMSToken) RevocationKey() string {
+	return fmt.Sprintf("%s#%s#%s", t.Issuer, t.Subject, string(t.Nonce))
+}
+
+func (t *DMSToken) Revoked(revoke *RevocationSet) bool {
+	return revoke.Revoked(t.RevocationKey())
 }
 
 func (t *Token) SignatureData() ([]byte, error) {
@@ -184,14 +253,14 @@ func (t *Token) Action() Action {
 	}
 }
 
-func (t *Token) Verify(trust did.TrustContext, now uint64) error {
-	return t.verify(trust, now, 0)
+func (t *Token) Verify(trust did.TrustContext, now uint64, revoke *RevocationSet) error {
+	return t.verify(trust, now, 0, revoke)
 }
 
-func (t *Token) verify(trust did.TrustContext, now, depth uint64) error {
+func (t *Token) verify(trust did.TrustContext, now, depth uint64, revoke *RevocationSet) error {
 	switch {
 	case t.DMS != nil:
-		return t.DMS.verify(trust, now, depth)
+		return t.DMS.verify(trust, now, depth, revoke)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -200,13 +269,35 @@ func (t *Token) verify(trust did.TrustContext, now, depth uint64) error {
 	}
 }
 
-func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64) error {
+func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64, revoke *RevocationSet) error {
 	if t.ExpireBefore(now) {
 		return ErrCapabilityExpired
 	}
 
+	if t.Action == Revoke {
+		anchor, err := trust.GetAnchor(t.Issuer)
+		if err != nil {
+			return fmt.Errorf("verify: anchor: %w", err)
+		}
+
+		data, err := t.SignatureData()
+		if err != nil {
+			return fmt.Errorf("verify: signature data: %w", err)
+		}
+
+		if err := anchor.Verify(data, t.Signature); err != nil {
+			return fmt.Errorf("verify: signature: %w", err)
+		}
+
+		return nil
+	}
+
 	if t.Depth > 0 && depth > t.Depth {
 		return fmt.Errorf("max token depth exceeded: %w", ErrNotAuthorized)
+	}
+
+	if t.Revoked(revoke) {
+		return fmt.Errorf("verify: token has been revoked: %w", ErrNotAuthorized)
 	}
 
 	if t.Chain != nil {
@@ -218,7 +309,7 @@ func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64) error {
 			return ErrCapabilityExpired
 		}
 
-		if err := t.Chain.verify(trust, now, depth+1); err != nil {
+		if err := t.Chain.verify(trust, now, depth+1, revoke); err != nil {
 			return err
 		}
 
@@ -713,6 +804,19 @@ func (t *DMSToken) AnchorDepth(anchor did.DID) (depth uint64, have bool) {
 	}
 
 	return depth, have
+}
+
+func (t *Token) Expiry() uint64 {
+	switch {
+	case t.DMS != nil:
+		return t.DMS.Expire
+
+	case t.UCAN != nil:
+		// TODO UCAN envelopes for BYO trust; followup
+		fallthrough
+	default:
+		return 0
+	}
 }
 
 func (t *Token) Expired() bool {

@@ -78,7 +78,7 @@ func TestBadSignature(t *testing.T) {
 		require.Error(t, err, "require")
 	})
 
-	// `AddRoots()` method should return an error when bad signature
+	// `AddRoots()` method should return an error when bad signatur, TokenList{}e
 	t.Run("bad signature when adding roots with require or provide", func(t *testing.T) {
 		t.Parallel()
 		bobRoot := makeCapabilityContext(t)
@@ -99,10 +99,10 @@ func TestBadSignature(t *testing.T) {
 		require.NoError(t, err, "grant")
 
 		// VALID scenario
-		err = alice.AddRoots(nil, tokenList, TokenList{})
+		err = alice.AddRoots(nil, tokenList, TokenList{}, TokenList{})
 		require.NoError(t, err)
 
-		err = alice.AddRoots(nil, tokenList, TokenList{})
+		err = alice.AddRoots(nil, tokenList, TokenList{}, TokenList{})
 		require.NoError(t, err)
 
 		// ADVERSARIAL scenario
@@ -114,12 +114,12 @@ func TestBadSignature(t *testing.T) {
 		}
 
 		// Try to use AddRoots() having tokens for require
-		err = alice.AddRoots(nil, tokenList, TokenList{})
+		err = alice.AddRoots(nil, tokenList, TokenList{}, TokenList{})
 		require.Error(t, err, "AddRoots should fail with tampered signature in require tokens")
 		require.ErrorIs(t, err, did.ErrInvalidSignature)
 
 		// Try to use AddRoots() having tokens for provide
-		err = alice.AddRoots(nil, TokenList{}, tokenList)
+		err = alice.AddRoots(nil, TokenList{}, tokenList, TokenList{})
 		require.Error(t, err, "AddRoots should fail with tampered signature in provide tokens")
 		require.ErrorIs(t, err, did.ErrInvalidSignature)
 	})
@@ -241,7 +241,7 @@ func TestWidenCaps(t *testing.T) {
 		)
 		require.NoError(t, err, "granting broadcast capability")
 
-		err = bob.AddRoots(nil, TokenList{}, tokens)
+		err = bob.AddRoots(nil, TokenList{}, tokens, TokenList{})
 		require.NoError(t, err, "add roots")
 
 		// delegate broadcast to alice
@@ -296,7 +296,7 @@ func TestAdversarialChains(t *testing.T) {
 		)
 		require.NoError(t, err, "Bob delegating to Alice")
 
-		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens)
+		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
 		require.NoError(t, err, "Alice adding Bob's tokens")
 
 		aliceJoeTokens, err := alice.Delegate(
@@ -311,13 +311,13 @@ func TestAdversarialChains(t *testing.T) {
 		require.NoError(t, err, "Alice delegating to Joe")
 
 		// VALID scenario
-		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens)
+		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 		require.NoError(t, err, "Joe adding alice delegated tokens as provide")
 
 		// ADVERSARIAL scenario
 		aliceJoeTokens.Tokens[0].DMS.Chain.DMS.Expire = makeExpiry(50 * time.Second)
 
-		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens)
+		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 		require.Error(t, err, "Joe adding alice tampered tokens as provide")
 	})
 	t.Run("should fail on expired certificate chains", func(t *testing.T) {
@@ -351,7 +351,7 @@ func TestAdversarialChains(t *testing.T) {
 		)
 		require.NoError(t, err, "Bob delegating to Alice")
 
-		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens)
+		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
 		require.NoError(t, err, "Alice adding Bob's tokens")
 
 		aliceJoeTokens, err := alice.Delegate(
@@ -365,7 +365,7 @@ func TestAdversarialChains(t *testing.T) {
 		)
 		require.NoError(t, err, "Alice delegating to Joe")
 
-		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens)
+		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 		require.NoError(t, err, "Joe adding alice tokens as provide")
 
 		joeInvokeTokens, err := joe.Provide(
@@ -428,7 +428,7 @@ func TestAdversarialChains(t *testing.T) {
 		)
 		require.NoError(t, err, "Bob delegating to Alice")
 
-		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens)
+		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
 		require.NoError(t, err, "Alice adding Bob's tokens")
 
 		aliceJoeTokens, err := alice.Delegate(
@@ -443,13 +443,13 @@ func TestAdversarialChains(t *testing.T) {
 		require.NoError(t, err, "Alice delegating to Joe")
 
 		// VALID SCENARIO
-		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens)
+		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 		require.NoError(t, err, "Joe adding valid alice delegated tokens")
 
 		// INVALID SCENARIO
 		aliceJoeTokens.Tokens[0].DMS.Chain.DMS.Capability = []Capability{Capability("/other-capability")}
 
-		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens)
+		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 		require.Error(t, err, "Joe adding alice delegated tokens (but it was tampered)")
 	})
 }

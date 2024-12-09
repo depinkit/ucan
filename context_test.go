@@ -59,46 +59,28 @@ func TestDelegationChain(t *testing.T) {
 		alice.DID(),
 		bob.DID(),
 		nil,
-		makeExpiry(110*time.Second),
+		makeExpiry(50*time.Second),
 		0,
 		[]Capability{Capability("/bob/hi")},
 	)
 	require.NoError(t, err, "Bob delegating to Alice")
 
-	for _, tok := range bobAliceTokens.Tokens {
-		token := tok
-		// t.Logf("%+v\n\n", tok.DMS)
-		for token.DMS.Chain != nil {
-			token = token.DMS.Chain
-			// t.Logf("%+v\n\n", token.DMS)
-		}
-	}
-
 	// we have to add as Provide so that we can delegate the granted caps
-	err = alice.AddRoots(nil, TokenList{}, bobAliceTokens)
+	err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
 	require.NoError(t, err, "Alice adding Bob's tokens")
 
 	aliceJoeTokens, err := alice.Delegate(
 		joe.DID(),
 		bob.DID(),
 		nil,
-		makeExpiry(100*time.Second),
+		makeExpiry(40*time.Second),
 		0,
 		[]Capability{Capability("/bob/hi")},
 		SelfSignNo,
 	)
 	require.NoError(t, err, "Alice delegating to Joe")
 
-	for _, tok := range aliceJoeTokens.Tokens {
-		token := tok
-		// t.Logf("%+v\n\n", tok.DMS)
-		for token.DMS.Chain != nil {
-			token = token.DMS.Chain
-			// t.Logf("%+v\n\n", token.DMS)
-		}
-	}
-
-	err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens)
+	err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 	require.NoError(t, err, "Joe adding alice tokens as provide")
 
 	// Joe prepares tokens for invoking capabilities on Bob
@@ -106,21 +88,11 @@ func TestDelegationChain(t *testing.T) {
 		bob.DID(),
 		joeID,
 		bobID,
-		makeExpiry(90*time.Second),
+		makeExpiry(30*time.Second),
 		[]Capability{Capability("/bob/hi")},
 		nil,
 	)
 	require.NoError(t, err, "Joe providing invoke tokens")
-
-	// t.Logf("bobAliceTokens:\n\n")
-	for _, tok := range bobAliceTokens.Tokens {
-		token := tok
-		// t.Logf("%+v\n\n", tok.DMS)
-		for token.DMS.Chain != nil {
-			token = token.DMS.Chain
-			// t.Logf("%+v\n\n", token.DMS)
-		}
-	}
 
 	// Bob consumes Joe's tokens
 	err = bob.Consume(joe.DID(), joeInvokeTokens)
@@ -208,7 +180,7 @@ func TestConsume(t *testing.T) {
 	sideChainAnchor := makeCapabilityContext(t)
 
 	// Add rootAnchor to consumer's roots
-	err := consumer.AddRoots([]did.DID{rootAnchor.DID()}, TokenList{}, TokenList{})
+	err := consumer.AddRoots([]did.DID{rootAnchor.DID()}, TokenList{}, TokenList{}, TokenList{})
 	require.NoError(t, err, "adding root anchor")
 
 	// 1. Token where consumer is the anchor
@@ -231,7 +203,7 @@ func TestConsume(t *testing.T) {
 
 	// Add sideChainAnchor token to consumer's require tokens
 	sideChainToken := createToken(t, sideChainAnchor, sideChainAnchor.DID(), did.DID{}, Capability("/test/other-cap"), makeExpiry(60*time.Second))
-	err = consumer.AddRoots(nil, TokenList{Tokens: []*Token{sideChainToken}}, TokenList{})
+	err = consumer.AddRoots(nil, TokenList{Tokens: []*Token{sideChainToken}}, TokenList{}, TokenList{})
 	require.NoError(t, err, "adding side chain tokens")
 
 	tokensToConsume := TokenList{
@@ -275,4 +247,342 @@ func TestConsume(t *testing.T) {
 	// Check that invalid tokens were not added
 	require.False(t, containsToken(tokensForOrigin, token5), "should not contain token5")
 	require.False(t, containsToken(tokensForOrigin, token6), "should not contain token6")
+}
+
+func TestRevoke(t *testing.T) {
+	t.Parallel()
+	t.Run("revoke single token", func(t *testing.T) {
+		// Important: do NOT remove the commented prints.
+		// This test is helpful to understand how a chain of delegation works visually.
+		t.Parallel()
+
+		root1 := makeCapabilityContext(t)
+		root2 := makeCapabilityContext(t)
+
+		bob := makeActorCapabilityContext(t, root1)
+		alice := makeActorCapabilityContext(t, root2)
+
+		// t.Logf("bob: %v\n", bob.DID())
+		// t.Logf("alice: %v\n", alice.DID())
+		// t.Logf("joe: %v\n", joe.DID())
+
+		bobID := makeActorIDFromDID(t, bob.DID())
+		aliceID := makeActorIDFromDID(t, alice.DID())
+
+		// reminder: Grant() does not depend on root capabilities, so
+		// we can delegate whatever we want since it's self signed
+		bobAliceTokens, err := bob.Grant(
+			Delegate,
+			alice.DID(),
+			bob.DID(),
+			nil,
+			makeExpiry(20*time.Second),
+			0,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob delegating to Alice")
+
+		// we have to add as Provide so that we can delegate the granted caps
+		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
+		require.NoError(t, err, "Alice adding Bob's tokens")
+
+		// Joe prepares tokens for invoking capabilities on Bob
+		aliceInvokeTokens, err := alice.Provide(
+			bob.DID(),
+			aliceID,
+			bobID,
+			makeExpiry(10*time.Second),
+			[]Capability{Capability("/bob/hi")},
+			nil,
+		)
+		require.NoError(t, err, "Alice providing invoke tokens")
+
+		// Bob consumes Joe's tokens
+		err = bob.Consume(alice.DID(), aliceInvokeTokens)
+		require.NoError(t, err, "Bob consuming Joe's tokens")
+
+		// Bob requires the capabilities from Joe
+		// Here is where Bob cheks if Joe has the necessary capabilities
+		err = bob.Require(
+			bob.DID(),
+			aliceID,
+			bobID,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob requiring capabilities from alice")
+
+		for _, token := range bobAliceTokens.Tokens {
+			revocation, err := bob.Revoke(token)
+			require.NoError(t, err)
+			require.NoError(t, bob.AddRoots(nil, TokenList{}, TokenList{}, TokenList{Tokens: []*Token{revocation}}))
+		}
+
+		err = bob.Require(
+			bob.DID(),
+			aliceID,
+			bobID,
+			[]Capability{Capability("/say/msg")},
+		)
+		require.Error(t, err, "verify: token has been revoked")
+	})
+
+	t.Run("revoke token in chain", func(t *testing.T) {
+		// Important: do NOT remove the commented prints.
+		// This test is helpful to understand how a chain of delegation works visually.
+		t.Parallel()
+
+		root1 := makeCapabilityContext(t)
+		root2 := makeCapabilityContext(t)
+		root3 := makeCapabilityContext(t)
+
+		bob := makeActorCapabilityContext(t, root1)
+		alice := makeActorCapabilityContext(t, root2)
+		joe := makeActorCapabilityContext(t, root3)
+
+		// t.Logf("bob: %v\n", bob.DID())
+		// t.Logf("alice: %v\n", alice.DID())
+		// t.Logf("joe: %v\n", joe.DID())
+
+		bobID := makeActorIDFromDID(t, bob.DID())
+		aliceID := makeActorIDFromDID(t, alice.DID())
+		joeID := makeActorIDFromDID(t, joe.DID())
+
+		// reminder: Grant() does not depend on root capabilities, so
+		// we can delegate whatever we want since it's self signed
+		bobAliceTokens, err := bob.Grant(
+			Delegate,
+			alice.DID(),
+			bob.DID(),
+			nil,
+			makeExpiry(20*time.Second),
+			0,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob delegating to Alice")
+
+		for _, tok := range bobAliceTokens.Tokens {
+			token := tok
+			// t.Logf("%+v\n\n", tok.DMS)
+			for token.DMS.Chain != nil {
+				token = token.DMS.Chain
+				// t.Logf("%+v\n\n", token.DMS)
+			}
+		}
+
+		// we have to add as Provide so that we can delegate the granted caps
+		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
+		require.NoError(t, err, "Alice adding Bob's tokens")
+
+		aliceJoeTokens, err := alice.Delegate(
+			joe.DID(),
+			bob.DID(),
+			nil,
+			makeExpiry(10*time.Second),
+			0,
+			[]Capability{Capability("/bob/hi")},
+			SelfSignNo,
+		)
+		require.NoError(t, err, "Alice delegating to Joe")
+
+		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
+		require.NoError(t, err, "Joe adding alice tokens as provide")
+
+		// Joe prepares tokens for invoking capabilities on Bob
+		joeInvokeTokens, err := joe.Provide(
+			bob.DID(),
+			joeID,
+			bobID,
+			makeExpiry(5*time.Second),
+			[]Capability{Capability("/bob/hi")},
+			nil,
+		)
+		require.NoError(t, err, "Joe providing invoke tokens")
+
+		// Bob consumes Joe's tokens
+		err = bob.Consume(joe.DID(), joeInvokeTokens)
+		require.NoError(t, err, "Bob consuming Joe's tokens")
+
+		// Bob requires the capabilities from Joe
+		// Here is where Bob cheks if Joe has the necessary capabilities
+		err = bob.Require(
+			bob.DID(),
+			joeID,
+			bobID,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob requiring capabilities from Joe")
+
+		for _, token := range bobAliceTokens.Tokens {
+			revocation, err := bob.Revoke(token)
+			require.NoError(t, err)
+			require.NoError(t, bob.AddRoots(nil, TokenList{}, TokenList{}, TokenList{Tokens: []*Token{revocation}}))
+		}
+
+		err = bob.Require(
+			bob.DID(),
+			aliceID,
+			bobID,
+			[]Capability{Capability("/say/msg")},
+		)
+		require.Error(t, err, "verify: token has been revoked")
+	})
+	t.Run("revoke token and try to anchor it after", func(t *testing.T) {
+		// Important: do NOT remove the commented prints.
+		// This test is helpful to understand how a chain of delegation works visually.
+		t.Parallel()
+
+		root1 := makeCapabilityContext(t)
+		root2 := makeCapabilityContext(t)
+
+		bob := makeActorCapabilityContext(t, root1)
+		alice := makeActorCapabilityContext(t, root2)
+
+		// t.Logf("bob: %v\n", bob.DID())
+		// t.Logf("alice: %v\n", alice.DID())
+		// t.Logf("joe: %v\n", joe.DID())
+
+		bobID := makeActorIDFromDID(t, bob.DID())
+		aliceID := makeActorIDFromDID(t, alice.DID())
+
+		// reminder: Grant() does not depend on root capabilities, so
+		// we can delegate whatever we want since it's self signed
+		bobAliceTokens, err := bob.Grant(
+			Delegate,
+			alice.DID(),
+			bob.DID(),
+			nil,
+			makeExpiry(20*time.Second),
+			0,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob delegating to Alice")
+
+		// we have to add as Provide so that we can delegate the granted caps
+		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
+		require.NoError(t, err, "Alice adding Bob's tokens")
+
+		// Joe prepares tokens for invoking capabilities on Bob
+		aliceInvokeTokens, err := alice.Provide(
+			bob.DID(),
+			aliceID,
+			bobID,
+			makeExpiry(10*time.Second),
+			[]Capability{Capability("/bob/hi")},
+			nil,
+		)
+		require.NoError(t, err, "Alice providing invoke tokens")
+
+		// Bob consumes Joe's tokens
+		err = bob.Consume(alice.DID(), aliceInvokeTokens)
+		require.NoError(t, err, "Bob consuming Joe's tokens")
+
+		// Bob requires the capabilities from Joe
+		// Here is where Bob cheks if Joe has the necessary capabilities
+		err = bob.Require(
+			bob.DID(),
+			aliceID,
+			bobID,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob requiring capabilities from alice")
+
+		for _, token := range bobAliceTokens.Tokens {
+			revocation, err := bob.Revoke(token)
+			require.NoError(t, err)
+			require.NoError(t, bob.AddRoots(nil, TokenList{}, TokenList{}, TokenList{Tokens: []*Token{revocation}}))
+		}
+
+		err = bob.Require(
+			bob.DID(),
+			aliceID,
+			bobID,
+			[]Capability{Capability("/say/msg")},
+		)
+		require.Error(t, err, "verify: token has been revoked")
+		require.Error(t, bob.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{}), "verify: token has been revoked")
+	})
+
+	t.Run("expired revocation token cannot be anchored", func(t *testing.T) {
+		// Important: do NOT remove the commented prints.
+		// This test is helpful to understand how a chain of delegation works visually.
+		t.Parallel()
+
+		root1 := makeCapabilityContext(t)
+		root2 := makeCapabilityContext(t)
+
+		bob := makeActorCapabilityContext(t, root1)
+		alice := makeActorCapabilityContext(t, root2)
+
+		// t.Logf("bob: %v\n", bob.DID())
+		// t.Logf("alice: %v\n", alice.DID())
+		// t.Logf("joe: %v\n", joe.DID())
+
+		bobID := makeActorIDFromDID(t, bob.DID())
+		aliceID := makeActorIDFromDID(t, alice.DID())
+
+		// reminder: Grant() does not depend on root capabilities, so
+		// we can delegate whatever we want since it's self signed
+		bobAliceTokens, err := bob.Grant(
+			Delegate,
+			alice.DID(),
+			bob.DID(),
+			nil,
+			makeExpiry(5*time.Second),
+			0,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob delegating to Alice")
+
+		// we have to add as Provide so that we can delegate the granted caps
+		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
+		require.NoError(t, err, "Alice adding Bob's tokens")
+
+		// Joe prepares tokens for invoking capabilities on Bob
+		aliceInvokeTokens, err := alice.Provide(
+			bob.DID(),
+			aliceID,
+			bobID,
+			makeExpiry(2*time.Second),
+			[]Capability{Capability("/bob/hi")},
+			nil,
+		)
+		require.NoError(t, err, "Alice providing invoke tokens")
+
+		// Bob consumes Joe's tokens
+		err = bob.Consume(alice.DID(), aliceInvokeTokens)
+		require.NoError(t, err, "Bob consuming Joe's tokens")
+
+		// Bob requires the capabilities from Joe
+		// Here is where Bob cheks if Joe has the necessary capabilities
+		err = bob.Require(
+			bob.DID(),
+			aliceID,
+			bobID,
+			[]Capability{Capability("/bob/hi")},
+		)
+		require.NoError(t, err, "Bob requiring capabilities from alice")
+
+		for _, token := range bobAliceTokens.Tokens {
+			revocation, err := bob.Revoke(token)
+			require.NoError(t, err)
+			require.NoError(t, bob.AddRoots(nil, TokenList{}, TokenList{}, TokenList{Tokens: []*Token{revocation}}))
+		}
+
+		err = bob.Require(
+			bob.DID(),
+			aliceID,
+			bobID,
+			[]Capability{Capability("/say/msg")},
+		)
+		require.Error(t, err, "verify: token has been revoked")
+		require.Error(t, bob.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{}), "verify: token has been revoked")
+
+		<-time.After(5 * time.Second)
+
+		for _, token := range bobAliceTokens.Tokens {
+			revocation, err := bob.Revoke(token)
+			require.NoError(t, err)
+			require.Error(t, bob.AddRoots(nil, TokenList{}, TokenList{}, TokenList{Tokens: []*Token{revocation}}), ErrCapabilityExpired)
+		}
+	})
 }

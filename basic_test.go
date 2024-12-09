@@ -234,7 +234,7 @@ func TestBroadcastDistrust(t *testing.T) {
 	)
 	require.NoError(t, err, "granting broadcast capability")
 
-	err = actor1.AddRoots(nil, TokenList{}, tokens)
+	err = actor1.AddRoots(nil, TokenList{}, tokens, TokenList{})
 	require.NoError(t, err, "add roots")
 
 	actor1ID := makeActorID(t)
@@ -279,7 +279,7 @@ func TestDelegationDepth(t *testing.T) {
 	)
 	require.NoError(t, err, "grant")
 
-	err = root2.AddRoots(nil, TokenList{}, tokens)
+	err = root2.AddRoots(nil, TokenList{}, tokens, TokenList{})
 	require.NoError(t, err, "provide anchor")
 
 	_, err = root2.DelegateInvocation(
@@ -329,7 +329,7 @@ func makeTrustContext(t *testing.T) (did.DID, did.TrustContext) {
 func makeCapabilityContext(t *testing.T) CapabilityContext {
 	rootDID, trustCtx := makeTrustContext(t)
 
-	capCtx, err := NewCapabilityContext(trustCtx, rootDID, nil, TokenList{}, TokenList{})
+	capCtx, err := NewCapabilityContext(trustCtx, rootDID, nil, TokenList{}, TokenList{}, TokenList{})
 	require.NoError(t, err, "make capability context")
 
 	return capCtx
@@ -359,6 +359,7 @@ func makeActorCapabilityContext(t *testing.T, rootCtx CapabilityContext, actorCa
 		[]did.DID{rootCtx.DID()},
 		TokenList{},
 		tokens,
+		TokenList{},
 	)
 	require.NoError(t, err, "adding roots for actor")
 
@@ -376,7 +377,7 @@ func allowReciprocal(t *testing.T, actor, root, otherRoot CapabilityContext, act
 		actorCap)
 	require.NoError(t, err, "granting reciprocal capabilities")
 
-	err = actor.AddRoots(nil, tokens, TokenList{})
+	err = actor.AddRoots(nil, tokens, TokenList{}, TokenList{})
 	require.NoError(t, err, "add roots")
 }
 
@@ -392,7 +393,7 @@ func allowBroadcast(t *testing.T, actor1, actor2, root1, root2 CapabilityContext
 	)
 	require.NoError(t, err, "granting broadcast capability")
 
-	err = actor1.AddRoots(nil, TokenList{}, tokens)
+	err = actor1.AddRoots(nil, TokenList{}, tokens, TokenList{})
 	require.NoError(t, err, "add roots")
 
 	tokens, err = root2.Grant(
@@ -406,7 +407,7 @@ func allowBroadcast(t *testing.T, actor1, actor2, root1, root2 CapabilityContext
 	)
 	require.NoError(t, err, "granting broadcast capability")
 
-	err = actor2.AddRoots(nil, tokens, TokenList{})
+	err = actor2.AddRoots(nil, tokens, TokenList{}, TokenList{})
 	require.NoError(t, err, "add roots")
 }
 

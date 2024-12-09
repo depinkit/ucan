@@ -21,10 +21,11 @@ type Saver interface {
 }
 
 type CapabilityContextView struct {
-	DID     did.DID
-	Roots   []did.DID
-	Require TokenList
-	Provide TokenList
+	DID     did.DID   `json:"did"`
+	Roots   []did.DID `json:"roots"`
+	Require TokenList `json:"require"`
+	Provide TokenList `json:"provide"`
+	Revoke  TokenList `json:"revoke"`
 }
 
 func SaveCapabilityContext(ctx CapabilityContext, wr io.Writer) error {
@@ -38,13 +39,14 @@ func SaveCapabilityContext(ctx CapabilityContext, wr io.Writer) error {
 }
 
 func saveCapabilityContext(ctx *BasicCapabilityContext, wr io.Writer) error {
-	roots, require, provide := ctx.ListRoots()
+	roots, require, provide, revoke := ctx.ListRoots()
 
 	view := CapabilityContextView{
 		DID:     ctx.provider.DID(),
 		Roots:   roots,
 		Require: require,
 		Provide: provide,
+		Revoke:  revoke,
 	}
 
 	encoder := json.NewEncoder(wr)
@@ -55,7 +57,7 @@ func saveCapabilityContext(ctx *BasicCapabilityContext, wr io.Writer) error {
 	return nil
 }
 
-func LoadCapabilityContext(trust did.TrustContext, rd io.Reader) (CapabilityContext, error) {
+func LoadCapabilityContextWithName(name string, trust did.TrustContext, rd io.Reader) (CapabilityContext, error) {
 	var view CapabilityContextView
 
 	decoder := json.NewDecoder(rd)
@@ -63,7 +65,7 @@ func LoadCapabilityContext(trust did.TrustContext, rd io.Reader) (CapabilityCont
 		return nil, fmt.Errorf("decoding capability context view: %w", err)
 	}
 
-	var require, provide TokenList
+	var require, provide, revoke TokenList
 	for _, t := range view.Require.Tokens {
 		if !t.Expired() {
 			require.Tokens = append(require.Tokens, t)
@@ -76,5 +78,15 @@ func LoadCapabilityContext(trust did.TrustContext, rd io.Reader) (CapabilityCont
 		}
 	}
 
-	return NewCapabilityContext(trust, view.DID, view.Roots, require, provide)
+	for _, t := range view.Revoke.Tokens {
+		if !t.Expired() {
+			revoke.Tokens = append(revoke.Tokens, t)
+		}
+	}
+
+	return NewCapabilityContextWithName(name, trust, view.DID, view.Roots, require, provide, revoke)
+}
+
+func LoadCapabilityContext(trust did.TrustContext, rd io.Reader) (CapabilityContext, error) {
+	return LoadCapabilityContextWithName("dms", trust, rd)
 }
