@@ -199,6 +199,7 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide, r
 	ctx.addRoots(roots)
 
 	now := uint64(time.Now().UnixNano())
+
 	for _, t := range revoke.Tokens {
 		if t.Action() != Revoke {
 			return fmt.Errorf("verify token: %w", ErrBadToken)
@@ -226,7 +227,41 @@ func (ctx *BasicCapabilityContext) AddRoots(roots []did.DID, require, provide, r
 		ctx.consumeProvideToken(t)
 	}
 
+	ctx.cleanUpTokens()
+
 	return nil
+}
+
+func (ctx *BasicCapabilityContext) cleanUpTokens() {
+	now := time.Now().UnixNano()
+	for _, anchor := range ctx.getRequireAnchors() {
+		tokenList := ctx.getRequireTokens(anchor)
+		for i, t := range tokenList {
+			if err := t.Verify(ctx.trust, uint64(now), ctx.revoke); err != nil {
+				tokenList = append(tokenList[:i], tokenList[i+1:]...)
+			}
+		}
+		ctx.require[anchor] = tokenList
+	}
+
+	for _, anchor := range ctx.getProvideAnchors() {
+		tokenList := ctx.getProvideTokens(anchor)
+		for i, t := range tokenList {
+			if err := t.Verify(ctx.trust, uint64(now), ctx.revoke); err != nil {
+				tokenList = append(tokenList[:i], tokenList[i+1:]...)
+			}
+		}
+		ctx.provide[anchor] = tokenList
+	}
+
+	for subject, tokenList := range ctx.tokens {
+		for i, t := range tokenList {
+			if err := t.Verify(ctx.trust, uint64(now), ctx.revoke); err != nil {
+				tokenList = append(tokenList[:i], tokenList[i+1:]...)
+			}
+		}
+		ctx.tokens[subject] = tokenList
+	}
 }
 
 func (ctx *BasicCapabilityContext) ListRoots() ([]did.DID, TokenList, TokenList, TokenList) {

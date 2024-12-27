@@ -285,6 +285,8 @@ func TestRevoke(t *testing.T) {
 		// we have to add as Provide so that we can delegate the granted caps
 		err = alice.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{})
 		require.NoError(t, err, "Alice adding Bob's tokens")
+		err = bob.AddRoots(nil, bobAliceTokens, TokenList{}, TokenList{})
+		require.NoError(t, err, "Bob adding Bob's tokens")
 
 		// Joe prepares tokens for invoking capabilities on Bob
 		aliceInvokeTokens, err := alice.Provide(
@@ -321,9 +323,9 @@ func TestRevoke(t *testing.T) {
 			bob.DID(),
 			aliceID,
 			bobID,
-			[]Capability{Capability("/say/msg")},
+			[]Capability{Capability("/bob/hi")},
 		)
-		require.Error(t, err, "verify: token has been revoked")
+		require.Error(t, err, "token has been revoked but require still passes")
 	})
 
 	t.Run("revoke token in chain", func(t *testing.T) {
@@ -422,7 +424,7 @@ func TestRevoke(t *testing.T) {
 			bob.DID(),
 			aliceID,
 			bobID,
-			[]Capability{Capability("/say/msg")},
+			[]Capability{Capability("/bob/hi")},
 		)
 		require.Error(t, err, "verify: token has been revoked")
 	})
@@ -496,7 +498,7 @@ func TestRevoke(t *testing.T) {
 			bob.DID(),
 			aliceID,
 			bobID,
-			[]Capability{Capability("/say/msg")},
+			[]Capability{Capability("/bob/hi")},
 		)
 		require.Error(t, err, "verify: token has been revoked")
 		require.Error(t, bob.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{}), "verify: token has been revoked")
@@ -572,7 +574,7 @@ func TestRevoke(t *testing.T) {
 			bob.DID(),
 			aliceID,
 			bobID,
-			[]Capability{Capability("/say/msg")},
+			[]Capability{Capability("/bob/hi")},
 		)
 		require.Error(t, err, "verify: token has been revoked")
 		require.Error(t, bob.AddRoots(nil, TokenList{}, bobAliceTokens, TokenList{}), "verify: token has been revoked")
