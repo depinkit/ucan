@@ -432,7 +432,7 @@ func makeActorIDFromDID(t *testing.T, d did.DID) crypto.ID {
 }
 
 func createToken(t *testing.T, issuer CapabilityContext,
-	subjectDID, audienceDID did.DID, cap Capability, expiry uint64,
+	subjectDID, audienceDID did.DID, capability Capability, expiry uint64,
 ) *Token {
 	nonce := make([]byte, nonceLength)
 	_, err := rand.Read(nonce)
@@ -444,7 +444,7 @@ func createToken(t *testing.T, issuer CapabilityContext,
 			Subject:    subjectDID,
 			Audience:   audienceDID,
 			Action:     Delegate,
-			Capability: []Capability{cap},
+			Capability: []Capability{capability},
 			Expire:     expiry,
 			Nonce:      nonce,
 		},

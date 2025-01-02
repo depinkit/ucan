@@ -59,10 +59,10 @@ type CapabilityContext interface {
 
 	// Consume ingests some or all of the provided capability tokens.
 	// It'll only return an error if all provided capabilities were not ingested.
-	Consume(origin did.DID, cap []byte) error
+	Consume(origin did.DID, capToken []byte) error
 
 	// Discard discards previously consumed capability tokens
-	Discard(cap []byte)
+	Discard(capTokens []byte)
 
 	// Require ensures that at least one of the capabilities is delegated from
 	// the subject to the audience, with an appropriate anchor
@@ -100,7 +100,7 @@ type CapabilityContext interface {
 	RemoveRoots(trust []did.DID, require, provide TokenList)
 
 	// Delegate creates the appropriate delegation tokens anchored in our roots
-	Delegate(subject, audience did.DID, topics []string, expire, depth uint64, cap []Capability, selfSign SelfSignMode) (TokenList, error)
+	Delegate(subject, audience did.DID, topics []string, expire, depth uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error)
 
 	// DelegateInvocation creates the appropriate invocation tokens anchored in anchor
 	DelegateInvocation(target, subject, audience did.DID, expire uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error)
@@ -598,13 +598,13 @@ func (ctx *BasicCapabilityContext) delegateBroadcast(tokenList []*Token, anchor 
 	return result
 }
 
-func (ctx *BasicCapabilityContext) Consume(origin did.DID, data []byte) error {
-	if len(data) > maxCapabilitySize {
+func (ctx *BasicCapabilityContext) Consume(origin did.DID, capToken []byte) error {
+	if len(capToken) > maxCapabilitySize {
 		return ErrTooBig
 	}
 
 	var tokens TokenList
-	if err := json.Unmarshal(data, &tokens); err != nil {
+	if err := json.Unmarshal(capToken, &tokens); err != nil {
 		return fmt.Errorf("unmarshaling payload: %w", err)
 	}
 
@@ -650,9 +650,9 @@ func (ctx *BasicCapabilityContext) Consume(origin did.DID, data []byte) error {
 	return nil
 }
 
-func (ctx *BasicCapabilityContext) Discard(data []byte) {
+func (ctx *BasicCapabilityContext) Discard(capTokens []byte) {
 	var tokens TokenList
-	if err := json.Unmarshal(data, &tokens); err != nil {
+	if err := json.Unmarshal(capTokens, &tokens); err != nil {
 		return
 	}
 
@@ -717,8 +717,8 @@ func (ctx *BasicCapabilityContext) consumeRevokeToken(t *Token) {
 	ctx.revoke.Revoke(t)
 }
 
-func (ctx *BasicCapabilityContext) Require(anchor did.DID, subject crypto.ID, audience crypto.ID, cap []Capability) error {
-	if len(cap) == 0 {
+func (ctx *BasicCapabilityContext) Require(anchor did.DID, subject crypto.ID, audience crypto.ID, require []Capability) error {
+	if len(require) == 0 {
 		return fmt.Errorf("no capabilities: %w", ErrNotAuthorized)
 	}
 
@@ -737,7 +737,7 @@ func (ctx *BasicCapabilityContext) Require(anchor did.DID, subject crypto.ID, au
 	requireAnchors := ctx.getRequireAnchors()
 
 	for _, t := range tokenList {
-		for _, c := range cap {
+		for _, c := range require {
 			if t.Anchor(anchor) && t.AllowInvocation(subjectDID, audienceDID, c) {
 				return nil
 			}
