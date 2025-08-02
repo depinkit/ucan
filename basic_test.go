@@ -439,7 +439,7 @@ func createToken(t *testing.T, issuer CapabilityContext,
 	require.NoError(t, err)
 
 	token := &Token{
-		DMS: &DMSToken{
+		Domain: &DomainToken{
 			Issuer:     issuer.DID(),
 			Subject:    subjectDID,
 			Audience:   audienceDID,
@@ -449,13 +449,13 @@ func createToken(t *testing.T, issuer CapabilityContext,
 			Nonce:      nonce,
 		},
 	}
-	data, err := token.DMS.SignatureData()
+	data, err := token.Domain.SignatureData()
 	require.NoError(t, err)
 
 	provider, err := issuer.Trust().GetProvider(issuer.DID())
 	require.NoError(t, err)
 
-	token.DMS.Signature, err = provider.Sign(data)
+	token.Domain.Signature, err = provider.Sign(data)
 	require.NoError(t, err)
 
 	return token

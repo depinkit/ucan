@@ -365,8 +365,8 @@ func TestRevoke(t *testing.T) {
 		for _, tok := range bobAliceTokens.Tokens {
 			token := tok
 			// t.Logf("%+v\n\n", tok.DMS)
-			for token.DMS.Chain != nil {
-				token = token.DMS.Chain
+			for token.Domain.Chain != nil {
+				token = token.Domain.Chain
 				// t.Logf("%+v\n\n", token.DMS)
 			}
 		}

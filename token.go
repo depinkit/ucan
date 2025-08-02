@@ -33,13 +33,13 @@ const (
 var signaturePrefix = []byte("dms:token:")
 
 type Token struct {
-	// DMS tokens
-	DMS *DMSToken `json:"dms,omitempty"`
+	// Domain tokens
+	Domain *DomainToken `json:"domain,omitempty"`
 	// UCAN standard (when it is done) envelope for BYO anhcors
 	UCAN *BYOToken `json:"ucan,omitempty"`
 }
 
-type DMSToken struct {
+type DomainToken struct {
 	Action     Action       `json:"act"`
 	Issuer     did.DID      `json:"iss"`
 	Subject    did.DID      `json:"sub"`
@@ -111,8 +111,8 @@ func (r *RevocationSet) gc(now uint64) {
 
 func (t *Token) RevocationKey() string {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.RevocationKey()
+	case t.Domain != nil:
+		return t.Domain.RevocationKey()
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -121,18 +121,18 @@ func (t *Token) RevocationKey() string {
 	}
 }
 
-func (t *DMSToken) RevocationKey() string {
+func (t *DomainToken) RevocationKey() string {
 	return fmt.Sprintf("%s#%s#%s", t.Issuer, t.Subject, string(t.Nonce))
 }
 
-func (t *DMSToken) Revoked(revoke *RevocationSet) bool {
+func (t *DomainToken) Revoked(revoke *RevocationSet) bool {
 	return revoke.Revoked(t.RevocationKey())
 }
 
 func (t *Token) SignatureData() ([]byte, error) {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.SignatureData()
+	case t.Domain != nil:
+		return t.Domain.SignatureData()
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -141,7 +141,7 @@ func (t *Token) SignatureData() ([]byte, error) {
 	}
 }
 
-func (t *DMSToken) SignatureData() ([]byte, error) {
+func (t *DomainToken) SignatureData() ([]byte, error) {
 	tCopy := *t
 	tCopy.Signature = nil
 
@@ -159,8 +159,8 @@ func (t *DMSToken) SignatureData() ([]byte, error) {
 
 func (t *Token) Issuer() did.DID {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Issuer
+	case t.Domain != nil:
+		return t.Domain.Issuer
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -171,8 +171,8 @@ func (t *Token) Issuer() did.DID {
 
 func (t *Token) Subject() did.DID {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Subject
+	case t.Domain != nil:
+		return t.Domain.Subject
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -183,8 +183,8 @@ func (t *Token) Subject() did.DID {
 
 func (t *Token) Audience() did.DID {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Audience
+	case t.Domain != nil:
+		return t.Domain.Audience
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -195,8 +195,8 @@ func (t *Token) Audience() did.DID {
 
 func (t *Token) Capability() []Capability {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Capability
+	case t.Domain != nil:
+		return t.Domain.Capability
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -207,8 +207,8 @@ func (t *Token) Capability() []Capability {
 
 func (t *Token) Topic() []Capability {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Topic
+	case t.Domain != nil:
+		return t.Domain.Topic
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -219,8 +219,8 @@ func (t *Token) Topic() []Capability {
 
 func (t *Token) Expire() uint64 {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Expire
+	case t.Domain != nil:
+		return t.Domain.Expire
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -231,8 +231,8 @@ func (t *Token) Expire() uint64 {
 
 func (t *Token) Nonce() []byte {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Nonce
+	case t.Domain != nil:
+		return t.Domain.Nonce
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -243,8 +243,8 @@ func (t *Token) Nonce() []byte {
 
 func (t *Token) Action() Action {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Action
+	case t.Domain != nil:
+		return t.Domain.Action
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -259,8 +259,8 @@ func (t *Token) Verify(trust did.TrustContext, now uint64, revoke *RevocationSet
 
 func (t *Token) verify(trust did.TrustContext, now, depth uint64, revoke *RevocationSet) error {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.verify(trust, now, depth, revoke)
+	case t.Domain != nil:
+		return t.Domain.verify(trust, now, depth, revoke)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -269,7 +269,7 @@ func (t *Token) verify(trust did.TrustContext, now, depth uint64, revoke *Revoca
 	}
 }
 
-func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64, revoke *RevocationSet) error {
+func (t *DomainToken) verify(trust did.TrustContext, now, depth uint64, revoke *RevocationSet) error {
 	if t.ExpireBefore(now) {
 		return ErrCapabilityExpired
 	}
@@ -352,8 +352,8 @@ func (t *DMSToken) verify(trust did.TrustContext, now, depth uint64, revoke *Rev
 
 func (t *Token) AllowAction(ot *Token) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.AllowAction(ot)
+	case t.Domain != nil:
+		return t.Domain.AllowAction(ot)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -362,7 +362,7 @@ func (t *Token) AllowAction(ot *Token) bool {
 	}
 }
 
-func (t *DMSToken) AllowAction(ot *Token) bool {
+func (t *DomainToken) AllowAction(ot *Token) bool {
 	if t.Action != Delegate {
 		return false
 	}
@@ -422,8 +422,8 @@ func (t *Token) Size() int {
 
 func (t *Token) Subsumes(ot *Token) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Subsumes(ot)
+	case t.Domain != nil:
+		return t.Domain.Subsumes(ot)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -432,7 +432,7 @@ func (t *Token) Subsumes(ot *Token) bool {
 	}
 }
 
-func (t *DMSToken) Subsumes(ot *Token) bool {
+func (t *DomainToken) Subsumes(ot *Token) bool {
 	if t.Issuer.Equal(ot.Issuer()) &&
 		t.Subject.Equal(ot.Subject()) &&
 		t.Audience.Equal(ot.Audience()) &&
@@ -454,8 +454,8 @@ func (t *DMSToken) Subsumes(ot *Token) bool {
 
 func (t *Token) AllowInvocation(subject, audience did.DID, c Capability) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.AllowInvocation(subject, audience, c)
+	case t.Domain != nil:
+		return t.Domain.AllowInvocation(subject, audience, c)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -464,7 +464,7 @@ func (t *Token) AllowInvocation(subject, audience did.DID, c Capability) bool {
 	}
 }
 
-func (t *DMSToken) AllowInvocation(subject, audience did.DID, c Capability) bool {
+func (t *DomainToken) AllowInvocation(subject, audience did.DID, c Capability) bool {
 	if t.Action != Invoke {
 		return false
 	}
@@ -488,8 +488,8 @@ func (t *DMSToken) AllowInvocation(subject, audience did.DID, c Capability) bool
 
 func (t *Token) AllowBroadcast(subject did.DID, topic Capability, c Capability) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.AllowBroadcast(subject, topic, c)
+	case t.Domain != nil:
+		return t.Domain.AllowBroadcast(subject, topic, c)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -498,7 +498,7 @@ func (t *Token) AllowBroadcast(subject did.DID, topic Capability, c Capability) 
 	}
 }
 
-func (t *DMSToken) AllowBroadcast(subject did.DID, topic Capability, c Capability) bool {
+func (t *DomainToken) AllowBroadcast(subject did.DID, topic Capability, c Capability) bool {
 	if t.Action != Broadcast {
 		return false
 	}
@@ -534,8 +534,8 @@ func (t *DMSToken) AllowBroadcast(subject did.DID, topic Capability, c Capabilit
 
 func (t *Token) AllowDelegation(action Action, issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.AllowDelegation(action, issuer, audience, topics, expire, c)
+	case t.Domain != nil:
+		return t.Domain.AllowDelegation(action, issuer, audience, topics, expire, c)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -545,7 +545,7 @@ func (t *Token) AllowDelegation(action Action, issuer, audience did.DID, topics 
 	}
 }
 
-func (t *DMSToken) AllowDelegation(action Action, issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
+func (t *DomainToken) AllowDelegation(action Action, issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
 	if action == Delegate {
 		if !t.verifyDepth(2) {
 			// certificate would be dead end with 1
@@ -562,8 +562,8 @@ func (t *DMSToken) AllowDelegation(action Action, issuer, audience did.DID, topi
 
 func (t *Token) allowDelegation(issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.allowDelegation(issuer, audience, topics, expire, c)
+	case t.Domain != nil:
+		return t.Domain.allowDelegation(issuer, audience, topics, expire, c)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -573,7 +573,7 @@ func (t *Token) allowDelegation(issuer, audience did.DID, topics []Capability, e
 	}
 }
 
-func (t *DMSToken) allowDelegation(issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
+func (t *DomainToken) allowDelegation(issuer, audience did.DID, topics []Capability, expire uint64, c Capability) bool {
 	if t.Action != Delegate {
 		return false
 	}
@@ -615,8 +615,8 @@ func (t *DMSToken) allowDelegation(issuer, audience did.DID, topics []Capability
 
 func (t *Token) verifyDepth(depth uint64) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.verifyDepth(depth)
+	case t.Domain != nil:
+		return t.Domain.verifyDepth(depth)
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
 		fallthrough
@@ -625,7 +625,7 @@ func (t *Token) verifyDepth(depth uint64) bool {
 	}
 }
 
-func (t *DMSToken) verifyDepth(depth uint64) bool {
+func (t *DomainToken) verifyDepth(depth uint64) bool {
 	if t.Depth > 0 && depth > t.Depth {
 		return false
 	}
@@ -639,13 +639,13 @@ func (t *DMSToken) verifyDepth(depth uint64) bool {
 
 func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*Token, error) {
 	switch {
-	case t.DMS != nil:
-		result, err := t.DMS.Delegate(provider, subject, audience, topics, expire, depth, c)
+	case t.Domain != nil:
+		result, err := t.Domain.Delegate(provider, subject, audience, topics, expire, depth, c)
 		if err != nil {
 			return nil, fmt.Errorf("delegate invocation: %w", err)
 		}
 
-		return &Token{DMS: result}, nil
+		return &Token{Domain: result}, nil
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -655,11 +655,11 @@ func (t *Token) Delegate(provider did.Provider, subject, audience did.DID, topic
 	}
 }
 
-func (t *DMSToken) Delegate(provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*DMSToken, error) {
+func (t *DomainToken) Delegate(provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*DomainToken, error) {
 	return t.delegate(Delegate, provider, subject, audience, topics, expire, depth, c)
 }
 
-func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*DMSToken, error) {
+func (t *DomainToken) delegate(action Action, provider did.Provider, subject, audience did.DID, topics []Capability, expire, depth uint64, c []Capability) (*DomainToken, error) {
 	if t.Action != Delegate {
 		return nil, ErrNotAuthorized
 	}
@@ -681,7 +681,7 @@ func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audie
 		return nil, fmt.Errorf("nonce: %w", err)
 	}
 
-	result := &DMSToken{
+	result := &DomainToken{
 		Action:     action,
 		Issuer:     provider.DID(),
 		Subject:    subject,
@@ -691,7 +691,7 @@ func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audie
 		Nonce:      nonce,
 		Expire:     expire,
 		Depth:      depth,
-		Chain:      &Token{DMS: t},
+		Chain:      &Token{Domain: t},
 	}
 
 	data, err := result.SignatureData()
@@ -710,13 +710,13 @@ func (t *DMSToken) delegate(action Action, provider did.Provider, subject, audie
 
 func (t *Token) DelegateInvocation(provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*Token, error) {
 	switch {
-	case t.DMS != nil:
-		result, err := t.DMS.DelegateInvocation(provider, subject, audience, expire, c)
+	case t.Domain != nil:
+		result, err := t.Domain.DelegateInvocation(provider, subject, audience, expire, c)
 		if err != nil {
 			return nil, fmt.Errorf("delegate invocation: %w", err)
 		}
 
-		return &Token{DMS: result}, nil
+		return &Token{Domain: result}, nil
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -726,19 +726,19 @@ func (t *Token) DelegateInvocation(provider did.Provider, subject, audience did.
 	}
 }
 
-func (t *DMSToken) DelegateInvocation(provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*DMSToken, error) {
+func (t *DomainToken) DelegateInvocation(provider did.Provider, subject, audience did.DID, expire uint64, c []Capability) (*DomainToken, error) {
 	return t.delegate(Invoke, provider, subject, audience, nil, expire, 0, c)
 }
 
 func (t *Token) DelegateBroadcast(provider did.Provider, subject did.DID, topic Capability, expire uint64, c []Capability) (*Token, error) {
 	switch {
-	case t.DMS != nil:
-		result, err := t.DMS.DelegateBroadcast(provider, subject, topic, expire, c)
+	case t.Domain != nil:
+		result, err := t.Domain.DelegateBroadcast(provider, subject, topic, expire, c)
 		if err != nil {
 			return nil, fmt.Errorf("delegate invocation: %w", err)
 		}
 
-		return &Token{DMS: result}, nil
+		return &Token{Domain: result}, nil
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -748,14 +748,14 @@ func (t *Token) DelegateBroadcast(provider did.Provider, subject did.DID, topic 
 	}
 }
 
-func (t *DMSToken) DelegateBroadcast(provider did.Provider, subject did.DID, topic Capability, expire uint64, c []Capability) (*DMSToken, error) {
+func (t *DomainToken) DelegateBroadcast(provider did.Provider, subject did.DID, topic Capability, expire uint64, c []Capability) (*DomainToken, error) {
 	return t.delegate(Broadcast, provider, subject, did.DID{}, []Capability{topic}, expire, 0, c)
 }
 
 func (t *Token) Anchor(anchor did.DID) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Anchor(anchor)
+	case t.Domain != nil:
+		return t.Domain.Anchor(anchor)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -765,7 +765,7 @@ func (t *Token) Anchor(anchor did.DID) bool {
 	}
 }
 
-func (t *DMSToken) Anchor(anchor did.DID) bool {
+func (t *DomainToken) Anchor(anchor did.DID) bool {
 	if t.Issuer.Equal(anchor) {
 		return true
 	}
@@ -779,8 +779,8 @@ func (t *DMSToken) Anchor(anchor did.DID) bool {
 
 func (t *Token) AnchorDepth(anchor did.DID) (uint64, bool) {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.AnchorDepth(anchor)
+	case t.Domain != nil:
+		return t.Domain.AnchorDepth(anchor)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -790,7 +790,7 @@ func (t *Token) AnchorDepth(anchor did.DID) (uint64, bool) {
 	}
 }
 
-func (t *DMSToken) AnchorDepth(anchor did.DID) (depth uint64, have bool) {
+func (t *DomainToken) AnchorDepth(anchor did.DID) (depth uint64, have bool) {
 	if t.Issuer.Equal(anchor) {
 		have = true
 		depth = 0
@@ -808,8 +808,8 @@ func (t *DMSToken) AnchorDepth(anchor did.DID) (depth uint64, have bool) {
 
 func (t *Token) Expiry() uint64 {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.Expire
+	case t.Domain != nil:
+		return t.Domain.Expire
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -825,8 +825,8 @@ func (t *Token) Expired() bool {
 
 func (t *Token) ExpireBefore(deadline uint64) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.ExpireBefore(deadline)
+	case t.Domain != nil:
+		return t.Domain.ExpireBefore(deadline)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -836,7 +836,7 @@ func (t *Token) ExpireBefore(deadline uint64) bool {
 	}
 }
 
-func (t *DMSToken) ExpireBefore(deadline uint64) bool {
+func (t *DomainToken) ExpireBefore(deadline uint64) bool {
 	if deadline > t.Expire {
 		return true
 	}
@@ -850,8 +850,8 @@ func (t *DMSToken) ExpireBefore(deadline uint64) bool {
 
 func (t *Token) SelfSigned(origin did.DID) bool {
 	switch {
-	case t.DMS != nil:
-		return t.DMS.SelfSigned(origin)
+	case t.Domain != nil:
+		return t.Domain.SelfSigned(origin)
 
 	case t.UCAN != nil:
 		// TODO UCAN envelopes for BYO trust; followup
@@ -861,7 +861,7 @@ func (t *Token) SelfSigned(origin did.DID) bool {
 	}
 }
 
-func (t *DMSToken) SelfSigned(origin did.DID) bool {
+func (t *DomainToken) SelfSigned(origin did.DID) bool {
 	if t.Chain != nil {
 		return t.Chain.SelfSigned(origin)
 	}

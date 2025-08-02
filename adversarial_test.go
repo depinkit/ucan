@@ -62,8 +62,8 @@ func TestBadSignature(t *testing.T) {
 
 		// Tamper tokens's signatures
 		for _, token := range tokens.Tokens {
-			if token.DMS != nil {
-				token.DMS.Signature = []byte("invalid signature")
+			if token.Domain != nil {
+				token.Domain.Signature = []byte("invalid signature")
 			}
 		}
 		tamperedCap, err := json.Marshal(tokens)
@@ -108,8 +108,8 @@ func TestBadSignature(t *testing.T) {
 		// ADVERSARIAL scenario
 		// Tamper with the signature of the tokens
 		for _, token := range tokenList.Tokens {
-			if token.DMS != nil {
-				token.DMS.Signature = []byte("invalid signature")
+			if token.Domain != nil {
+				token.Domain.Signature = []byte("invalid signature")
 			}
 		}
 
@@ -171,8 +171,8 @@ func TestChangeAudience(t *testing.T) {
 	require.NoError(t, err, "unmarshal intercepted cap")
 
 	for _, token := range tokens.Tokens {
-		if token.DMS != nil {
-			token.DMS.Audience = joe.DID()
+		if token.Domain != nil {
+			token.Domain.Audience = joe.DID()
 		}
 	}
 
@@ -315,7 +315,7 @@ func TestAdversarialChains(t *testing.T) {
 		require.NoError(t, err, "Joe adding alice delegated tokens as provide")
 
 		// ADVERSARIAL scenario
-		aliceJoeTokens.Tokens[0].DMS.Chain.DMS.Expire = makeExpiry(50 * time.Second)
+		aliceJoeTokens.Tokens[0].Domain.Chain.Domain.Expire = makeExpiry(50 * time.Second)
 
 		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 		require.Error(t, err, "Joe adding alice tampered tokens as provide")
@@ -447,7 +447,7 @@ func TestAdversarialChains(t *testing.T) {
 		require.NoError(t, err, "Joe adding valid alice delegated tokens")
 
 		// INVALID SCENARIO
-		aliceJoeTokens.Tokens[0].DMS.Chain.DMS.Capability = []Capability{Capability("/other-capability")}
+		aliceJoeTokens.Tokens[0].Domain.Chain.Domain.Capability = []Capability{Capability("/other-capability")}
 
 		err = joe.AddRoots(nil, TokenList{}, aliceJoeTokens, TokenList{})
 		require.Error(t, err, "Joe adding alice delegated tokens (but it was tampered)")

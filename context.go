@@ -332,7 +332,7 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 		topicCap = append(topicCap, Capability(topic))
 	}
 
-	result := &DMSToken{
+	result := &DomainToken{
 		Issuer:     ctx.DID(),
 		Subject:    subject,
 		Audience:   audience,
@@ -355,7 +355,7 @@ func (ctx *BasicCapabilityContext) Grant(action Action, subject, audience did.DI
 	}
 
 	result.Signature = sig
-	return TokenList{Tokens: []*Token{{DMS: result}}}, nil
+	return TokenList{Tokens: []*Token{{Domain: result}}}, nil
 }
 
 func (ctx *BasicCapabilityContext) Revoke(token *Token) (*Token, error) {
@@ -363,7 +363,7 @@ func (ctx *BasicCapabilityContext) Revoke(token *Token) (*Token, error) {
 		return nil, ErrNotAuthorized
 	}
 
-	revocationToken := &DMSToken{
+	revocationToken := &DomainToken{
 		Action:  Revoke,
 		Issuer:  token.Issuer(),
 		Subject: token.Subject(),
@@ -382,7 +382,7 @@ func (ctx *BasicCapabilityContext) Revoke(token *Token) (*Token, error) {
 	}
 
 	revocationToken.Signature = sig
-	return &Token{DMS: revocationToken}, nil
+	return &Token{Domain: revocationToken}, nil
 }
 
 func (ctx *BasicCapabilityContext) Delegate(subject, audience did.DID, topics []string, expire, depth uint64, provide []Capability, selfSign SelfSignMode) (TokenList, error) {
