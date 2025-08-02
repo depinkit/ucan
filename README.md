@@ -6,7 +6,7 @@ A Go implementation of UCAN (User Controlled Authorization Networks) providing d
 
 UCAN (User Controlled Authorization Networks) is a specification for decentralized authorization tokens that enable secure, capability-based access control. This library provides a complete implementation for creating, delegating, and verifying UCAN tokens in Go applications.
 
-To see UCAN in action, please check the [actor](https://github.com/depinkint/actor) implementation that relies on UCAN for security.
+To see UCAN in action, please check the [actor](https://github.com/depinkit/actor) implementation that relies on UCAN for security.
 ## Features
 
 - **Decentralized Authorization**: Self-contained authorization tokens
