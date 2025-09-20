@@ -15,7 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"gitlab.com/nunet/device-management-service/lib/did"
+	"github.com/depinkit/did"
 )
 
 // Note: for adversarial tests, we first check the valid scenario

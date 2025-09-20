@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"io"
 
-	"gitlab.com/nunet/device-management-service/lib/did"
+	"github.com/depinkit/did"
 )
 
 type Saver interface {

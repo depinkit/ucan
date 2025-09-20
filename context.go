@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.com/nunet/device-management-service/lib/crypto"
-	"gitlab.com/nunet/device-management-service/lib/did"
+	"github.com/depinkit/crypto"
+	"github.com/depinkit/did"
 )
 
 const (

@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"gitlab.com/nunet/device-management-service/lib/crypto"
-	"gitlab.com/nunet/device-management-service/lib/did"
+	"github.com/depinkit/crypto"
+	"github.com/depinkit/did"
 )
 
 func TestBasicUCAN(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"gitlab.com/nunet/device-management-service/lib/did"
+	"github.com/depinkit/did"
 )
 
 // TestDelegationChain tests a simple chain of delegation as follows:
