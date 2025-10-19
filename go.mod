@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/depinkit/crypto v0.0.0-20250802204016-68f52d2e27ac
-	github.com/depinkit/did v0.0.0-20250920223252-5076b5d83d02
+	github.com/depinkit/did v0.0.0-20250920224121-c830718ddec2
 	github.com/ipfs/go-log/v2 v2.8.1
 	github.com/stretchr/testify v1.10.0
 )
@@ -21,7 +21,6 @@ require (
 	github.com/multiformats/go-varint v0.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
-	gitlab.com/nunet/device-management-service v0.7.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/crypto v0.42.0 // indirect
